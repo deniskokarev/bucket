@@ -1,0 +1,74 @@
+/*
+ * nucleo_wb55rg overlay for the bucket project.
+ *
+ * Two jobs:
+ *   1. Instantiate the STM32WB55 TSC peripheral. Unlike the F0/U0 SoCs, the
+ *      WB `.dtsi` does NOT ship a `tsc` node, so we add it here. Register
+ *      address / IRQ / clock / reset come from the STM32WB55 reference manual
+ *      and CMSIS headers:
+ *        TSC @ 0x40024000, IRQ 39, RCC AHB1 bit 16 (TSCEN/TSCRST).
+ *   2. Declare the `pump` GPIO output.
+ *
+ * TSC pin choice (Group 1, all free on this board — LEDs=PB0/1/5,
+ * USART1=PB6/7, I2C1=PB8/9, SPI1/TIM on PAx):
+ *   - PB12 = G1_IO1 -> sampling capacitor (external Cs to GND, ~10-50nF)
+ *   - PB13 = G1_IO2 -> sensing electrode (the bucket-wall plate)
+ * Adjust to your wiring; keep sampling-io and channel-ios in the same group.
+ */
+
+#include <zephyr/dt-bindings/input/input-event-codes.h>
+#include <zephyr/dt-bindings/input/stm32-tsc-defines.h>
+
+/ {
+	aliases {
+		pump = &pump_out;
+	};
+
+	/* Simple GPIO output for the pump MOSFET/relay driver. */
+	pump_control {
+		compatible = "gpio-leds";
+		pump_out: pump_out {
+			gpios = <&gpioa 0 GPIO_ACTIVE_HIGH>;
+			label = "Evacuation pump";
+		};
+	};
+};
+
+/* The WB `soc` node is unlabeled; extend it by path to add the TSC. */
+&{/soc} {
+	tsc: tsc@40024000 {
+		compatible = "st,stm32-tsc";
+		reg = <0x40024000 0x400>;
+		clocks = <&rcc STM32_CLOCK(AHB1, 16)>;
+		resets = <&rctl STM32_RESET(AHB1, 16)>;
+		interrupts = <39 0>;
+		interrupt-names = "global";
+
+		pinctrl-0 = <&tsc_g1_io1_pb12 &tsc_g1_io2_pb13>;
+		pinctrl-names = "default";
+
+		st,pulse-generator-prescaler = <2>;
+		st,charge-transfer-pulse-high = <2>;
+		st,charge-transfer-pulse-low = <2>;
+		st,spread-spectrum-prescaler = <1>;
+		st,spread-spectrum-deviation = <1>;
+		st,max-count-value = <16383>;
+
+		status = "okay";
+
+		tsc_group1: group1 {
+			group = <0>;              /* Group 1 */
+			channel-ios = <TSC_IO2>;  /* PB13 electrode */
+			sampling-io = <TSC_IO1>;  /* PB12 + external Cs */
+
+			water_key: water_key {
+				compatible = "tsc-keys";
+				sampling-interval-ms = <20>;
+				oversampling = <10>;
+				noise-threshold = <50>;
+				sticky-key-timeout-ms = <10000>;
+				zephyr,code = <INPUT_KEY_0>;
+			};
+		};
+	};
+};
