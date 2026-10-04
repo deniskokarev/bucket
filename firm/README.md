@@ -108,11 +108,27 @@ This builds as a normal CMake project. The firm `CMakeLists.txt` defaults
 
 | File | Role |
 | ---- | ---- |
-| `src/main.c`  | init pump + level + BT, run the control loop |
+| `src/main.c`  | init pump + level + BT, advertise, run the control loop |
 | `src/level.c` | TSC input events → debounced "water present" (logs raw events) |
-| `src/pump.c`  | pump GPIO with min-run / max-run safety guards |
+| `src/pump.c`  | pump GPIO with min-run / max-run safety guards + control mode |
+| `src/gatt.c`  | custom GATT service: Level (read/notify) + Pump (read/write) |
 | `boards/nucleo_wb55rg.overlay` | TSC node (G1: PB12 Cs / PB13 electrode) + `pump` GPIO |
 | `boards/nucleo_wb55rg.conf`    | board Kconfig fragment |
+
+### BLE GATT service
+
+The board advertises service `d2f2a658-2605-4993-9794-01961b93a091` (name
+`BucketEvac`) with two characteristics — the contract shared with the mobile
+app in [`../client/src/utils/ble.ts`](../client/src/utils/ble.ts):
+
+| Characteristic | UUID | Props | Payload |
+| --- | --- | --- | --- |
+| Level | `3ec2dc2f-…a88003` | Read + Notify | `[water:u8, pump:u8, rawTSC:u16 LE]` |
+| Pump  | `4feebce2-…756af1` | Read + Write  | `u8` mode: `0=auto, 1=off, 2=on` |
+
+`rawTSC` is reserved (0) for now — the tsc-keys input driver only exposes
+press/release, not the raw acquisition count. Verified on-device with
+`gatt show-db` (handles 0x0012 Level, 0x0015 Pump).
 
 ## Wireless coprocessor (for BLE)
 

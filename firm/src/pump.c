@@ -28,6 +28,7 @@ static const struct gpio_dt_spec pump_gpio = GPIO_DT_SPEC_GET(PUMP_NODE, gpios);
 static bool state_on;           /* actual output state */
 static bool want_on;            /* last requested state */
 static int64_t last_change_ms;  /* uptime at last actual transition */
+static enum pump_mode mode = PUMP_MODE_AUTO;
 
 static void apply(bool on)
 {
@@ -62,6 +63,19 @@ int pump_init(void)
 	LOG_WRN("pump GPIO not defined; running as a no-op stub");
 #endif
 	return 0;
+}
+
+void pump_set_mode(enum pump_mode m)
+{
+	if (m != mode) {
+		mode = m;
+		LOG_INF("pump mode -> %d", (int)m);
+	}
+}
+
+enum pump_mode pump_get_mode(void)
+{
+	return mode;
 }
 
 void pump_request(bool on)
