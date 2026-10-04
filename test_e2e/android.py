@@ -205,8 +205,8 @@ class AndroidClient:
         return n
 
     def tap_until(self, *, text=None, contains=None, regex=None,
-                  want_text=None, want_contains=None, gone_text=None,
-                  attempts: int = 4, settle: float = 4) -> None:
+                  want_text=None, want_contains=None, want_regex=None,
+                  gone_text=None, attempts: int = 4, settle: float = 4) -> None:
         """Tap a button and verify the UI changed, retrying.
 
         Robust against dropped taps (e.g. Android often eats the first tap
@@ -224,12 +224,14 @@ class AndroidClient:
                     return
                 if want_contains is not None and self.has(contains=want_contains):
                     return
+                if want_regex is not None and self.has(regex=want_regex):
+                    return
                 if gone_text is not None and not self.has(text=gone_text):
                     return
                 time.sleep(1)
         raise UiError("tap had no effect after retries", self.safe_texts(),
-                      f"tap={tap_kw} want_text={want_text} "
-                      f"want_contains={want_contains} gone_text={gone_text}")
+                      f"tap={tap_kw} want_text={want_text} want_contains={want_contains} "
+                      f"want_regex={want_regex} gone_text={gone_text}")
 
     def confirm_pairing(self, timeout: float = 20) -> bool:
         """Tap the Android system 'PAIR' dialog if/when it appears.

@@ -26,7 +26,9 @@ ARTIFACTS = os.path.join(os.path.dirname(__file__), "artifacts")
 # App UI labels (what the user sees).
 SCAN = "Scan"
 STOP_SCANNING = "Stop Scanning"
-FORGET = "Forget Board"
+FORGET_LABEL = "Forget Board"        # substring of the varying button label
+CONFIRM_FORGET = r"(?i)^forget$"     # confirmation dialog's destructive button
+CANCEL = r"(?i)^cancel$"             # confirmation dialog's cancel button
 PUMP_ON = "On"
 PUMP_AUTO = "Auto"
 
@@ -82,6 +84,18 @@ class PipelineTest(unittest.TestCase):
         else:
             self.app.wait_for(text=STOP_SCANNING, timeout=15)
 
+    def _forget(self):
+        """Tap the (connected/disconnected) Forget button, confirm, -> scanning."""
+        # Open the confirmation dialog (label varies: "... Forget Board").
+        self.app.tap_until(contains=FORGET_LABEL, want_regex=CANCEL)
+        # A confirmation step must appear *before* anything is unbonded.
+        self.assertTrue(
+            self.app.has(regex=CONFIRM_FORGET),
+            "no confirmation dialog shown before unbonding",
+        )
+        # Confirm, then verify we return to scanning.
+        self.app.tap_until(regex=CONFIRM_FORGET, want_text=STOP_SCANNING)
+
     # ---- the pipeline ----
 
     def test_00_preconditions(self):
@@ -95,10 +109,10 @@ class PipelineTest(unittest.TestCase):
     def test_01_forget(self):
         # Start from a known unbonded state.
         try:
-            if self.app.has(text=FORGET):
-                self.app.tap_until(text=FORGET, want_text=STOP_SCANNING)
+            if self.app.has(contains=FORGET_LABEL):
+                self._forget()
             self._ensure_scanning()
-        except UiError as e:
+        except (UiError, AssertionError) as e:
             self.fail_verbose(f"expected unbonded/scanning state after forget: {e}")
 
     def test_02_bond(self):
@@ -113,7 +127,7 @@ class PipelineTest(unittest.TestCase):
         except AssertionError as e:
             self.fail_verbose(f"board did not reach a secure connection: {e}")
         try:
-            self.app.wait_for(text=FORGET, timeout=20)  # bonded UI
+            self.app.wait_for(contains=FORGET_LABEL, timeout=20)  # bonded UI
         except UiError as e:
             self.fail_verbose(f"app did not reach the bonded/connected UI: {e}")
 
@@ -123,6 +137,9 @@ class PipelineTest(unittest.TestCase):
             self.app.wait_for(contains="raw TSC", timeout=15)
         except UiError as e:
             self.fail_verbose(f"no live GATT Level data shown: {e}")
+        # While connected the forget button reads "Disconnect & Forget Board".
+        if not self.app.has(contains="Disconnect & Forget Board"):
+            self.fail_verbose("connected forget label should be 'Disconnect & Forget Board'")
 
     def test_04_gatt_write(self):
         self.board.clear()
@@ -152,7 +169,7 @@ class PipelineTest(unittest.TestCase):
         except AssertionError as e:
             self.fail_verbose(f"app did not auto-reconnect: {e}")
         try:
-            self.app.wait_for(text=FORGET, timeout=20)
+            self.app.wait_for(contains=FORGET_LABEL, timeout=20)
         except UiError as e:
             self.fail_verbose(f"app UI not connected after reconnect: {e}")
 
@@ -164,7 +181,7 @@ class PipelineTest(unittest.TestCase):
 
     def test_08_forget(self):
         try:
-            self.app.tap_until(text=FORGET, want_text=STOP_SCANNING)
+            self._forget()
         except (UiError, AssertionError) as e:
             self.fail_verbose(f"did not return to unbonded/scanning after forget: {e}")
 
