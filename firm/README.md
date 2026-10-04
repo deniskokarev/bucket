@@ -140,11 +140,13 @@ rejected except during a 60 s **bonding window**, opened by:
 - the **`bond`** shell command, or
 - pressing **SW1** (PC4, wired as an EXTI GPIO interrupt).
 
-During the window a client bonds by **reading the secure Pump attribute**, which
-triggers OS pairing (LE Secure Connections, Just Works). Bonds persist in the
-`storage` flash partition (NVS); bonded centrals reconnect encrypted with no
-re-pairing. Verified end-to-end on Android (`pairing complete (bonded=1)`,
-secure pump write succeeds).
+While the window is open the board also advertises a **bonding marker**
+(manufacturer data `FF FF 01`) so the app auto-pairs only after the user opens
+the window, not on mere discovery. A client then bonds by **reading the secure
+Pump attribute**, which triggers OS pairing (LE Secure Connections, Just Works).
+Bonds persist in the `storage` flash partition (NVS); bonded centrals reconnect
+encrypted with no re-pairing. Verified end-to-end on Android
+(`pairing complete (bonded=1)`, secure pump write succeeds).
 
 ## Wireless coprocessor (for BLE)
 

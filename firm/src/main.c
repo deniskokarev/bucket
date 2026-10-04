@@ -6,6 +6,7 @@
  * wired in but harmless until a real electrode + pump are connected and the
  * TSC thresholds are characterized.
  */
+#include "adv.h"
 #include "bond.h"
 #include "gatt.h"
 #include "level.h"
@@ -23,17 +24,30 @@ LOG_MODULE_REGISTER(main, LOG_LEVEL_INF);
 #define CONTROL_PERIOD_MS 200
 
 /* Service UUID in the primary advertisement so centrals can filter/scan for us;
- * must match gatt.c / client ble.ts. Name goes in the scan response (the two
- * together would overflow a single 31-byte advertisement). */
+ * must match gatt.c / client ble.ts. Name + bonding marker go in the scan
+ * response (name + UUID together would overflow a single 31-byte packet). */
 static const struct bt_data ad[] = {
 	BT_DATA_BYTES(BT_DATA_FLAGS, (BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR)),
 	BT_DATA_BYTES(BT_DATA_UUID128_ALL,
 		      BT_UUID_128_ENCODE(0xd2f2a658, 0x2605, 0x4993, 0x9794, 0x01961b93a091)),
 };
 
+/* Manufacturer data: company 0xFFFF (test/internal) + a bonding-mode flag byte.
+ * mfg_data[2] == 1 while the bonding window is open (see bt_set_bonding_adv). */
+static uint8_t mfg_data[] = {0xFF, 0xFF, 0x00};
+
 static const struct bt_data sd[] = {
 	BT_DATA(BT_DATA_NAME_COMPLETE, CONFIG_BT_DEVICE_NAME, sizeof(CONFIG_BT_DEVICE_NAME) - 1),
+	BT_DATA(BT_DATA_MANUFACTURER_DATA, mfg_data, sizeof(mfg_data)),
 };
+
+void bt_set_bonding_adv(bool on)
+{
+	mfg_data[2] = on ? 1 : 0;
+	/* Live-update if currently advertising; the byte is also authoritative for
+	 * the next start_adv(), so ignore errors (e.g. while connected). */
+	(void)bt_le_adv_update_data(ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
+}
 
 static int start_adv(void)
 {

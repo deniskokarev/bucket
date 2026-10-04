@@ -1,4 +1,5 @@
 #include "bond.h"
+#include "adv.h"
 
 #include <zephyr/bluetooth/conn.h>
 #include <zephyr/drivers/gpio.h>
@@ -13,19 +14,22 @@ LOG_MODULE_REGISTER(bond, LOG_LEVEL_INF);
 
 static atomic_t window_open; /* 1 while new pairings are accepted */
 
-static void window_expiry(struct k_timer *timer)
+/* Runs in the system workqueue (thread context) so BT APIs are safe. */
+static void window_close(struct k_work *work)
 {
-	ARG_UNUSED(timer);
+	ARG_UNUSED(work);
 	atomic_set(&window_open, 0);
+	bt_set_bonding_adv(false);
 	LOG_INF("bonding window closed");
 }
 
-static K_TIMER_DEFINE(window_timer, window_expiry, NULL);
+static K_WORK_DELAYABLE_DEFINE(window_work, window_close);
 
 void bond_start_window(void)
 {
 	atomic_set(&window_open, 1);
-	k_timer_start(&window_timer, K_SECONDS(BOND_WINDOW_SECONDS), K_NO_WAIT);
+	bt_set_bonding_adv(true); /* advertise the marker so the app auto-pairs */
+	k_work_reschedule(&window_work, K_SECONDS(BOND_WINDOW_SECONDS));
 	LOG_INF("bonding mode: accepting new pairings for %d s "
 		"(read the secure Pump attribute from the client)",
 		BOND_WINDOW_SECONDS);
@@ -62,7 +66,8 @@ static void pairing_complete(struct bt_conn *conn, bool bonded)
 	LOG_INF("pairing complete (bonded=%d)", bonded);
 	/* One successful bond per window. */
 	atomic_set(&window_open, 0);
-	k_timer_stop(&window_timer);
+	k_work_cancel_delayable(&window_work);
+	bt_set_bonding_adv(false);
 }
 
 static void pairing_failed(struct bt_conn *conn, enum bt_security_err reason)
