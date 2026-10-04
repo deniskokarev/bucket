@@ -18,6 +18,10 @@ LOG_MODULE_REGISTER(level, LOG_LEVEL_INF);
 #define LEVEL_TRIGGER_COUNT 300
 #define LEVEL_RELEASE_COUNT 400
 
+/* Below this, no sampling cap / electrode is connected (the acquisition
+ * completes in ~1 cycle) — not a real reading, so don't report "full". */
+#define LEVEL_COUNT_MIN_VALID 20
+
 static bool water_present;
 
 int level_init(void)
@@ -30,9 +34,13 @@ bool level_water_present(void)
 {
 	uint32_t count = tsc_last_count();
 
-	if (count == 0) {
-		/* No acquisition yet. */
-		return water_present;
+	if (count < LEVEL_COUNT_MIN_VALID) {
+		/* No acquisition yet, or no electrode/sampling cap wired. */
+		if (water_present) {
+			water_present = false;
+			LOG_INF("sensor not ready (count %u) -> dry", count);
+		}
+		return false;
 	}
 
 	if (water_present) {
