@@ -1,5 +1,6 @@
 import React from 'react';
 import {
+  Alert,
   SafeAreaView,
   ScrollView,
   Text,
@@ -23,6 +24,17 @@ function App() {
   const bucket = useBucket();
   const connected = bucket.status === 'connected';
   const scanning = bucket.status === 'scanning';
+
+  const confirmForget = () => {
+    Alert.alert(
+      'Forget this board?',
+      'The app will unpair and return to scanning for a board.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Forget', style: 'destructive', onPress: () => bucket.forget() },
+      ],
+    );
+  };
 
   return (
     <SafeAreaView style={styles.container}>
@@ -59,9 +71,13 @@ function App() {
               </View>
             )}
 
-            {/* Shown whenever bonded, connected or not. */}
-            <TouchableOpacity style={styles.forgetButton} onPress={bucket.forget}>
-              <Text style={styles.buttonText}>Forget Board</Text>
+            {/* Shown whenever bonded, connected or not. Confirms first. */}
+            <TouchableOpacity style={styles.forgetButton} onPress={confirmForget}>
+              <Text style={styles.buttonText}>
+                {connected
+                  ? 'Disconnect & Forget Board'
+                  : 'Stop Reconnecting & Forget Board'}
+              </Text>
             </TouchableOpacity>
           </>
         ) : (
