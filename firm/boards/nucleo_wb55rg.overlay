@@ -31,6 +31,17 @@
 			label = "Evacuation pump";
 		};
 	};
+
+	zephyr,user {
+		/* SW1 (PC4), owned directly for the bonding-mode EXTI handler
+		 * (see src/bond.c). The board's gpio-keys node is disabled below
+		 * so it doesn't also claim this pin. */
+		bond-gpios = <&gpioc 4 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
+	};
+};
+
+&{/gpio_keys} {
+	status = "disabled";
 };
 
 /* The WB `soc` node is unlabeled; extend it by path to add the TSC. */

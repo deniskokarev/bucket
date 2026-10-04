@@ -27,4 +27,5 @@ target_sources(app PRIVATE
   src/level.c
   src/tsc.c
   src/gatt.c
+  src/bond.c
 )

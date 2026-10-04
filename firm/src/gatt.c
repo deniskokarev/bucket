@@ -80,9 +80,12 @@ BT_GATT_SERVICE_DEFINE(bucket_svc,
 			       BT_GATT_PERM_READ,
 			       read_level, NULL, NULL),
 	BT_GATT_CCC(level_ccc_changed, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
+	/* Pump is secure: read + write require an encrypted (bonded) link. A
+	 * client reads this attribute to trigger pairing during the bonding
+	 * window (see src/bond.c). */
 	BT_GATT_CHARACTERISTIC(&pump_uuid.uuid,
 			       BT_GATT_CHRC_READ | BT_GATT_CHRC_WRITE,
-			       BT_GATT_PERM_READ | BT_GATT_PERM_WRITE,
+			       BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT,
 			       read_pump, write_pump, NULL),
 );
 /* clang-format on */

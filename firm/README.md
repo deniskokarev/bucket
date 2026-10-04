@@ -108,11 +108,13 @@ This builds as a normal CMake project. The firm `CMakeLists.txt` defaults
 
 | File | Role |
 | ---- | ---- |
-| `src/main.c`  | init pump + level + BT, advertise, run the control loop |
-| `src/level.c` | TSC input events → debounced "water present" (logs raw events) |
-| `src/pump.c`  | pump GPIO with min-run / max-run safety guards + control mode |
-| `src/gatt.c`  | custom GATT service: Level (read/notify) + Pump (read/write) |
-| `boards/nucleo_wb55rg.overlay` | TSC node (G1: PB12 Cs / PB13 electrode) + `pump` GPIO |
+| `src/main.c`  | init pump + level + BT, advertise (re-advertise on disconnect), control loop |
+| `src/tsc.c`   | raw TSC Group-1 acquisition; `tsc_last_count()` + `tsc` shell command |
+| `src/level.c` | raw count → "water present" with threshold + hysteresis |
+| `src/pump.c`  | pump GPIO with min-run / max-run guards + control mode |
+| `src/gatt.c`  | custom GATT service: Level (read/notify) + secure Pump (read/write) |
+| `src/bond.c`  | pairing window (`bond` shell cmd + SW1/EXTI), secure-access gating |
+| `boards/nucleo_wb55rg.overlay` | TSC node (G1: PB12 Cs / PB13 electrode), `pump` GPIO, SW1 bond button |
 | `boards/nucleo_wb55rg.conf`    | board Kconfig fragment |
 
 ### BLE GATT service
@@ -124,11 +126,25 @@ app in [`../client/src/utils/ble.ts`](../client/src/utils/ble.ts):
 | Characteristic | UUID | Props | Payload |
 | --- | --- | --- | --- |
 | Level | `3ec2dc2f-…a88003` | Read + Notify | `[water:u8, pump:u8, rawTSC:u16 LE]` |
-| Pump  | `4feebce2-…756af1` | Read + Write  | `u8` mode: `0=auto, 1=off, 2=on` |
+| Pump  | `4feebce2-…756af1` | Read + Write (**encrypted**) | `u8` mode: `0=auto, 1=off, 2=on` |
 
-`rawTSC` is reserved (0) for now — the tsc-keys input driver only exposes
-press/release, not the raw acquisition count. Verified on-device with
+`rawTSC` is the live raw Group-1 acquisition count. Verified on-device with
 `gatt show-db` (handles 0x0012 Level, 0x0015 Pump).
+
+### Pairing / bonding
+
+The Pump characteristic requires an **encrypted (bonded)** link, so pump control
+is only available after pairing; Level/notify stay open. New pairings are
+rejected except during a 60 s **bonding window**, opened by:
+
+- the **`bond`** shell command, or
+- pressing **SW1** (PC4, wired as an EXTI GPIO interrupt).
+
+During the window a client bonds by **reading the secure Pump attribute**, which
+triggers OS pairing (LE Secure Connections, Just Works). Bonds persist in the
+`storage` flash partition (NVS); bonded centrals reconnect encrypted with no
+re-pairing. Verified end-to-end on Android (`pairing complete (bonded=1)`,
+secure pump write succeeds).
 
 ## Wireless coprocessor (for BLE)
 

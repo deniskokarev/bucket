@@ -6,6 +6,7 @@
  * wired in but harmless until a real electrode + pump are connected and the
  * TSC thresholds are characterized.
  */
+#include "bond.h"
 #include "gatt.h"
 #include "level.h"
 #include "pump.h"
@@ -15,6 +16,7 @@
 #include <zephyr/bluetooth/uuid.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
+#include <zephyr/settings/settings.h>
 
 LOG_MODULE_REGISTER(main, LOG_LEVEL_INF);
 
@@ -91,6 +93,13 @@ static void bt_bringup(void)
 		return;
 	}
 	LOG_INF("Bluetooth controller ready");
+
+	if (IS_ENABLED(CONFIG_SETTINGS)) {
+		settings_load(); /* restore stored bonds */
+	}
+	if (bond_init() != 0) {
+		LOG_ERR("bond init failed");
+	}
 
 	if (start_adv() != 0) {
 		k_work_reschedule(&adv_work, K_MSEC(100));
