@@ -16,7 +16,6 @@
  * Adjust to your wiring; keep sampling-io and channel-ios in the same group.
  */
 
-#include <zephyr/dt-bindings/input/input-event-codes.h>
 #include <zephyr/dt-bindings/input/stm32-tsc-defines.h>
 
 / {
@@ -57,18 +56,13 @@
 		status = "okay";
 
 		tsc_group1: group1 {
-			group = <0>;              /* Group 1 */
+			/* Hardware TSC Group 1. The driver indexes registers as
+			 * (group - 1), so Group 1 is `group = <1>` (NOT 0). */
+			group = <1>;
 			channel-ios = <TSC_IO2>;  /* PB13 electrode */
 			sampling-io = <TSC_IO1>;  /* PB12 + external Cs */
-
-			water_key: water_key {
-				compatible = "tsc-keys";
-				sampling-interval-ms = <20>;
-				oversampling = <10>;
-				noise-threshold = <50>;
-				sticky-key-timeout-ms = <10000>;
-				zephyr,code = <INPUT_KEY_0>;
-			};
+			/* No `tsc-keys` child: we read the raw acquisition count
+			 * ourselves (see src/tsc.c) for level sensing + validation. */
 		};
 	};
 };

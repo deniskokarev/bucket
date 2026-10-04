@@ -1,6 +1,7 @@
 #include "gatt.h"
 #include "level.h"
 #include "pump.h"
+#include "tsc.h"
 
 #include <zephyr/bluetooth/gatt.h>
 #include <zephyr/bluetooth/uuid.h>
@@ -23,10 +24,8 @@ static bool level_notify_enabled;
 /* Level payload: [water:u8, pump:u8, rawTSC:u16 LE]. */
 static void fill_level(uint8_t buf[4])
 {
-	/* rawTSC is reserved (0) for now: the tsc-keys input driver only exposes
-	 * press/release, not the raw acquisition count. TODO: read the raw TSC
-	 * count directly once we bypass the input layer. */
-	uint16_t raw = 0;
+	uint32_t count = tsc_last_count();
+	uint16_t raw = count > UINT16_MAX ? UINT16_MAX : (uint16_t)count;
 
 	buf[0] = level_water_present() ? 1 : 0;
 	buf[1] = pump_is_on() ? 1 : 0;

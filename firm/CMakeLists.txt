@@ -25,5 +25,6 @@ target_sources(app PRIVATE
   src/main.c
   src/pump.c
   src/level.c
+  src/tsc.c
   src/gatt.c
 )

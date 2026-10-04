@@ -1,12 +1,9 @@
 /*
  * Capacitive water-level sensing via the STM32 TSC.
  *
- * The TSC + tsc-keys input driver turns a capacitance change on the electrode
- * (water rising past it) into INPUT_EV_KEY press/release events. This module
- * subscribes to those events and exposes a debounced "water present" state.
- *
- * During bring-up it also logs every input event so the raw behavior of the
- * electrode can be characterized against a real bucket.
+ * Reads the raw TSC acquisition count (see tsc.c) and applies a threshold with
+ * hysteresis to expose a debounced "water present" state. Water raises the
+ * electrode capacitance, which lowers the count.
  */
 #ifndef BUCKET_LEVEL_H
 #define BUCKET_LEVEL_H

@@ -1,42 +1,51 @@
 #include "level.h"
+#include "tsc.h"
 
-#include <zephyr/dt-bindings/input/input-event-codes.h>
-#include <zephyr/input/input.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 
 LOG_MODULE_REGISTER(level, LOG_LEVEL_INF);
 
-/* Key code emitted by the tsc-keys node for the water electrode (see overlay). */
-#define WATER_KEY_CODE INPUT_KEY_0
+/*
+ * Water raises the electrode capacitance, which LOWERS the TSC count. So water
+ * is "present" when the count falls below LEVEL_TRIGGER_COUNT, and clears when
+ * it rises back above LEVEL_RELEASE_COUNT (hysteresis to stop chatter).
+ *
+ * TODO: these are placeholders — calibrate from the bench sweep described in
+ * hard/tsc-validation.md. With Cs=47nF the empty count is expected ~650 and a
+ * full bucket ~130, so trigger/release sit between those.
+ */
+#define LEVEL_TRIGGER_COUNT 300
+#define LEVEL_RELEASE_COUNT 400
 
-static volatile bool water_present;
-
-static void input_cb(struct input_event *evt, void *user_data)
-{
-	ARG_UNUSED(user_data);
-
-	/* Log every event during bring-up / electrode characterization. */
-	LOG_INF("input: type=%u code=%u value=%d sync=%u", evt->type, evt->code, evt->value,
-		evt->sync);
-
-	if (evt->type == INPUT_EV_KEY && evt->code == WATER_KEY_CODE) {
-		water_present = (evt->value != 0);
-		LOG_INF("water %s", water_present ? "PRESENT" : "absent");
-	}
-}
-
-/* NULL device => receive events from every input device. */
-INPUT_CALLBACK_DEFINE(NULL, input_cb, NULL);
+static bool water_present;
 
 int level_init(void)
 {
 	water_present = false;
-	LOG_INF("level sensing ready (water key code = %d)", WATER_KEY_CODE);
-	return 0;
+	return tsc_init();
 }
 
 bool level_water_present(void)
 {
+	uint32_t count = tsc_last_count();
+
+	if (count == 0) {
+		/* No acquisition yet. */
+		return water_present;
+	}
+
+	if (water_present) {
+		if (count > LEVEL_RELEASE_COUNT) {
+			water_present = false;
+			LOG_INF("water absent (count %u)", count);
+		}
+	} else {
+		if (count < LEVEL_TRIGGER_COUNT) {
+			water_present = true;
+			LOG_INF("water PRESENT (count %u)", count);
+		}
+	}
+
 	return water_present;
 }
