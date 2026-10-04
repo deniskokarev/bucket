@@ -77,21 +77,26 @@ class BleService {
     }
 
     this.update({ status: 'scanning', error: null });
-    this.manager.startDeviceScan(
-      [BUCKET_SERVICE_UUID],
-      { allowDuplicates: false },
-      (error, device) => {
-        if (error) {
-          this.stopScan();
-          this.update({ status: 'error', error: error.message });
-          return;
-        }
-        if (device && (device.name === DEVICE_NAME || device.serviceUUIDs?.includes(BUCKET_SERVICE_UUID))) {
-          this.stopScan();
-          this.attach(device);
-        }
-      },
-    );
+    // Scan unfiltered and match in JS: the OS 128-bit service-UUID filter is
+    // unreliable across devices, and the name may live in the scan response.
+    this.manager.startDeviceScan(null, { allowDuplicates: false }, (error, device) => {
+      if (error) {
+        this.stopScan();
+        this.update({ status: 'error', error: error.message });
+        return;
+      }
+      if (!device) {
+        return;
+      }
+      const matches =
+        device.name === DEVICE_NAME ||
+        device.localName === DEVICE_NAME ||
+        device.serviceUUIDs?.includes(BUCKET_SERVICE_UUID);
+      if (matches) {
+        this.stopScan();
+        this.attach(device);
+      }
+    });
 
     this.scanTimer = setTimeout(() => {
       if (this.state.status === 'scanning') {
