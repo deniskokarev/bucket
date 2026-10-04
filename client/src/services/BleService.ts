@@ -55,6 +55,7 @@ class BleService {
   private manager = new BleManager();
   private device: Device | null = null;
   private levelSub: Subscription | null = null;
+  private disconnectSub: Subscription | null = null;
   private listeners = new Set<Listener>();
 
   private bondedId: string | null = null;
@@ -180,7 +181,7 @@ class BleService {
       this.device = await device.connect();
       await this.device.discoverAllServicesAndCharacteristics();
       this.attachLevel();
-      this.device.onDisconnected(() => this.handleDisconnect());
+      this.disconnectSub = this.device.onDisconnected(() => this.handleDisconnect());
       this.update({ status: 'connected' });
 
       // Reading the secure Pump char triggers OS pairing; it errors while the
@@ -233,7 +234,7 @@ class BleService {
       });
       await this.device.discoverAllServicesAndCharacteristics();
       this.attachLevel();
-      this.device.onDisconnected(() => this.handleDisconnect());
+      this.disconnectSub = this.device.onDisconnected(() => this.handleDisconnect());
       await this.readPump(); // bonded link encrypts automatically
       this.update({
         status: 'connected',
@@ -331,6 +332,10 @@ class BleService {
   }
 
   private async teardown(): Promise<void> {
+    // Remove the disconnect watcher first so an *intentional* teardown
+    // (stop/forget) doesn't trigger handleDisconnect's reconnect/rescan.
+    this.disconnectSub?.remove();
+    this.disconnectSub = null;
     this.levelSub?.remove();
     this.levelSub = null;
     const d = this.device;
@@ -345,6 +350,8 @@ class BleService {
   }
 
   private handleDisconnect(): void {
+    this.disconnectSub?.remove();
+    this.disconnectSub = null;
     this.levelSub?.remove();
     this.levelSub = null;
     this.device = null;
