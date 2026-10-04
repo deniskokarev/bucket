@@ -37,20 +37,20 @@ function App() {
       </View>
 
       <ScrollView style={styles.content}>
-        {/* Live sections are dimmed + non-interactive until connected, so
-            stale/placeholder values can't be mistaken for real readings. */}
-        <View
-          style={connected ? undefined : styles.dim}
-          pointerEvents={connected ? 'auto' : 'none'}>
-          <StatusCard level={bucket.level} />
+        {/* Live sections are hidden until connected, so placeholder values
+            can't be mistaken for real readings. */}
+        {connected ? (
+          <>
+            <StatusCard level={bucket.level} />
 
-          <PumpControl
-            pumpMode={bucket.pumpMode}
-            pumpOn={bucket.level?.pumpOn ?? false}
-            disabled={!connected}
-            onChange={bucket.setPumpMode}
-          />
-        </View>
+            <PumpControl
+              pumpMode={bucket.pumpMode}
+              pumpOn={bucket.level?.pumpOn ?? false}
+              disabled={false}
+              onChange={bucket.setPumpMode}
+            />
+          </>
+        ) : null}
 
         {connected ? (
           <TouchableOpacity style={styles.dangerButton} onPress={bucket.disconnect}>
