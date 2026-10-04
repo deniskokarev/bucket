@@ -31,6 +31,8 @@ export interface BucketState {
   deviceName: string | null;
   level: LevelStatus | null;
   pumpMode: PumpMode;
+  /** True once the secure Pump characteristic is readable (i.e. bonded). */
+  bonded: boolean;
   error: string | null;
 }
 
@@ -50,6 +52,7 @@ class BleService {
     deviceName: null,
     level: null,
     pumpMode: PumpMode.Auto,
+    bonded: false,
     error: null,
   };
 
@@ -135,18 +138,13 @@ class BleService {
         },
       );
 
-      // Read current pump mode once.
-      const pump = await this.device.readCharacteristicForService(
-        BUCKET_SERVICE_UUID,
-        PUMP_CHAR_UUID,
-      );
-      if (pump?.value) {
-        this.update({ pumpMode: base64ToBytes(pump.value)[0] as PumpMode });
-      }
-
       // Notice unexpected disconnects.
       this.device.onDisconnected(() => this.handleDisconnect());
 
+      // Don't touch the encrypted Pump characteristic here: on an unbonded
+      // link that would trigger an OS pairing attempt and (outside the board's
+      // bonding window) drop the connection. The user bonds explicitly via
+      // bond()/the "Pair" button. Level notifications work without bonding.
       this.update({ status: 'connected', error: null });
     } catch (e) {
       this.update({
@@ -154,6 +152,51 @@ class BleService {
         error: e instanceof Error ? e.message : String(e),
       });
     }
+  }
+
+  /** Read the (secure) Pump characteristic. Triggers pairing when unbonded. */
+  private async readPump(): Promise<boolean> {
+    if (!this.device) {
+      return false;
+    }
+    try {
+      const pump = await this.device.readCharacteristicForService(
+        BUCKET_SERVICE_UUID,
+        PUMP_CHAR_UUID,
+      );
+      if (pump?.value) {
+        this.update({ pumpMode: base64ToBytes(pump.value)[0] as PumpMode });
+      }
+      this.update({ bonded: true });
+      return true;
+    } catch {
+      this.update({ bonded: false });
+      return false;
+    }
+  }
+
+  /**
+   * Bond with the board: reading the secure Pump attribute makes the OS pair.
+   * Only works while the board's bonding window is open (`bond` / SW1), and the
+   * user must confirm the Android system pairing dialog. The first read often
+   * errors while that dialog is up, so retry for a bit to let pairing settle.
+   */
+  async bond(): Promise<void> {
+    this.update({ error: null });
+    for (let i = 0; i < 6; i++) {
+      if (await this.readPump()) {
+        return;
+      }
+      if (this.state.status !== 'connected') {
+        break; // link dropped
+      }
+      await new Promise<void>(r => setTimeout(() => r(), 2000));
+    }
+    this.update({
+      error:
+        'Pairing failed — put the board in bonding mode (run `bond` or press SW1), ' +
+        'tap Pair, and confirm the Android pairing prompt.',
+    });
   }
 
   /** Set the pump mode (auto / force-off / force-on). */
@@ -191,7 +234,7 @@ class BleService {
     this.levelSub?.remove();
     this.levelSub = null;
     this.device = null;
-    this.update({ status: 'idle', deviceName: null, level: null });
+    this.update({ status: 'idle', deviceName: null, level: null, bonded: false });
   }
 
   destroy() {

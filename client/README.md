@@ -30,9 +30,15 @@ Must match the firmware (`../firm`). Defined in `src/utils/ble.ts`:
 | ---- | ---- | ----- | ------- |
 | `d2f2a658-2605-4993-9794-01961b93a091` | Service | — | — |
 | `3ec2dc2f-cfdf-49e1-b232-da0dc4a88003` | Level | Read + Notify | `[water:u8, pump:u8, rawTSC:u16 LE]` |
-| `4feebce2-e1af-4634-915d-9e62b0756af1` | Pump | Read + Write | `u8` mode: `0=auto, 1=off, 2=on` |
+| `4feebce2-e1af-4634-915d-9e62b0756af1` | Pump | Read + Write (**encrypted**) | `u8` mode: `0=auto, 1=off, 2=on` |
 
 Advertised device name: **`BucketEvac`**.
+
+**Pairing:** the Pump characteristic requires a bonded link, so pump control is
+hidden/disabled until paired (Level is open). Put the board in bonding mode
+(`bond` shell command or press SW1), tap **Pair to control pump**, and confirm
+the OS pairing prompt. Reading the secure Pump attribute is what triggers OS
+pairing; the bond persists for future reconnects.
 
 > ⚠️ The firmware does not expose this custom service **yet** (it currently only
 > advertises + DIS). The app will connect but see no bucket characteristics

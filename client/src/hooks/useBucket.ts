@@ -6,6 +6,7 @@ export interface UseBucketReturn extends BucketState {
   connect: () => Promise<void>;
   disconnect: () => Promise<void>;
   setPumpMode: (mode: PumpMode) => Promise<void>;
+  bond: () => Promise<void>;
 }
 
 export const useBucket = (): UseBucketReturn => {
@@ -22,6 +23,7 @@ export const useBucket = (): UseBucketReturn => {
     (mode: PumpMode) => bleService.setPumpMode(mode),
     [],
   );
+  const bond = useCallback(() => bleService.bond(), []);
 
-  return { ...state, connect, disconnect, setPumpMode };
+  return { ...state, connect, disconnect, setPumpMode, bond };
 };

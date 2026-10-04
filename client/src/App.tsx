@@ -46,9 +46,15 @@ function App() {
             <PumpControl
               pumpMode={bucket.pumpMode}
               pumpOn={bucket.level?.pumpOn ?? false}
-              disabled={false}
+              disabled={!bucket.bonded}
               onChange={bucket.setPumpMode}
             />
+
+            {!bucket.bonded ? (
+              <TouchableOpacity style={styles.primaryButton} onPress={bucket.bond}>
+                <Text style={styles.buttonText}>Pair to control pump</Text>
+              </TouchableOpacity>
+            ) : null}
           </>
         ) : null}
 
