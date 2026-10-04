@@ -23,6 +23,10 @@ Starting points to characterize:
 Expect raw TSC counts to drift with temperature and humidity — the firmware
 uses hysteresis (and later, baseline tracking) rather than a fixed threshold.
 
+See **[tsc-validation.md](tsc-validation.md)** for the bench characterization
+plan, sampling-capacitor sizing, and the through-hole parts to prototype on a
+bare Nucleo (assuming empty ≈ 50 pF, full ≈ 250 pF).
+
 ## Actuator: evacuation pump
 
 - Low-voltage diaphragm/peristaltic pump.
