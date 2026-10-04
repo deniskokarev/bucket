@@ -60,6 +60,7 @@ class BleService {
   private bondedId: string | null = null;
   private loaded = false;
   private active = false; // app is in the foreground
+  private scanning = false; // a scan is currently running (avoid restarts)
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
   private state: BucketState = {
@@ -112,6 +113,7 @@ class BleService {
 
   async stop(): Promise<void> {
     this.active = false;
+    this.scanning = false;
     this.clearReconnect();
     this.manager.stopDeviceScan();
     await this.teardown();
@@ -121,15 +123,25 @@ class BleService {
   // ---- scanning (unbonded) ----
 
   startScan(): void {
-    if (this.bondedId || !this.active) {
+    // Keep one scan running; Android throttles scan *restarts* (~5 / 30 s).
+    if (this.bondedId || !this.active || this.scanning) {
       return;
     }
-    this.manager.stopDeviceScan(); // guard against a scan already in progress
+    this.scanning = true;
+    this.clearReconnect();
     this.update({ status: 'scanning', error: null });
     this.manager.startDeviceScan(null, { allowDuplicates: false }, (err, device) => {
       if (err) {
+        this.scanning = false;
         this.manager.stopDeviceScan();
-        this.update({ status: 'error', error: err.message });
+        // Most often Android's scan throttle — pause and retry rather than
+        // getting stuck in an error state.
+        this.update({ status: 'error', error: `Scanning paused (${err.message}); retrying…` });
+        this.clearReconnect();
+        this.reconnectTimer = setTimeout(() => {
+          this.update({ error: null });
+          this.startScan();
+        }, 15000);
         return;
       }
       if (!device) {
@@ -141,6 +153,7 @@ class BleService {
         device.serviceUUIDs?.includes(BUCKET_SERVICE_UUID);
       // Only auto-pair when the board signals bonding mode (SW1 pressed).
       if (isBucket && isBondingAdv(device.manufacturerData)) {
+        this.scanning = false;
         this.manager.stopDeviceScan();
         this.autoBond(device);
       }
@@ -148,6 +161,7 @@ class BleService {
   }
 
   stopScan(): void {
+    this.scanning = false;
     this.manager.stopDeviceScan();
     this.update({ status: 'idle' });
   }
