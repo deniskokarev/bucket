@@ -120,6 +120,14 @@ export const styles = {
     alignItems: 'center' as const,
   },
 
+  forgetButton: {
+    backgroundColor: '#dc2626',
+    borderRadius: 14,
+    paddingVertical: 18,
+    alignItems: 'center' as const,
+    marginTop: 8,
+  },
+
   buttonText: {
     color: 'white',
     fontSize: 17,

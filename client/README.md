@@ -34,11 +34,22 @@ Must match the firmware (`../firm`). Defined in `src/utils/ble.ts`:
 
 Advertised device name: **`BucketEvac`**.
 
-**Pairing:** the Pump characteristic requires a bonded link, so pump control is
-hidden/disabled until paired (Level is open). Put the board in bonding mode
-(`bond` shell command or press SW1), tap **Pair to control pump**, and confirm
-the OS pairing prompt. Reading the secure Pump attribute is what triggers OS
-pairing; the bond persists for future reconnects.
+### Connection model
+
+The app drives everything from its foreground state (no background work):
+
+- **Unbonded:** scans on open (**Scan / Stop Scanning** button). When you press
+  **SW1** on the board, it advertises a *bonding marker*; the app then
+  auto-connects and pairs (confirm the Android prompt). The marker is why it
+  pairs on *your* button press, not on mere discovery.
+- **Bonded:** on open it **auto-connects** to the stored board and keeps
+  retrying while in range (persisted in AsyncStorage). A red **Forget Board**
+  button is always shown; it returns the app to the unbonded/scanning state.
+- Closing/backgrounding the app disconnects and stops scanning.
+
+The bond itself persists on the board (NVS) and in the OS. "Forget Board" clears
+the app's record; the OS/board keys remain, so re-pairing later is seamless
+(remove the OS bond in Android Settings for a full reset).
 
 > ⚠️ The firmware does not expose this custom service **yet** (it currently only
 > advertises + DIS). The app will connect but see no bucket characteristics

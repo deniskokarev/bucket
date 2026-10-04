@@ -72,6 +72,19 @@ export function base64ToBytes(b64: string): Uint8Array {
 }
 
 /**
+ * The board sets manufacturer data [0xFF, 0xFF, 1] while its bonding window is
+ * open (SW1 pressed / `bond`). The app only auto-pairs when it sees this, so
+ * the user initiates bonding from the board. `mfg` is the base64 from ble-plx.
+ */
+export function isBondingAdv(mfg: string | null | undefined): boolean {
+  if (!mfg) {
+    return false;
+  }
+  const b = base64ToBytes(mfg);
+  return b.length >= 3 && b[0] === 0xff && b[1] === 0xff && b[2] === 1;
+}
+
+/**
  * Request the runtime permissions BLE needs on Android. iOS relies on the
  * NSBluetoothAlwaysUsageDescription Info.plist string and returns true here.
  */

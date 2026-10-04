@@ -1,11 +1,15 @@
-/**
- * BLE service for the Bucket evacuator board (singleton, mirrors the
- * ttsService pattern from the AI-chat client).
+/*
+ * BLE service for the Bucket board (singleton).
  *
- * Wraps react-native-ble-plx: scans for the firmware's custom GATT service,
- * connects, subscribes to Level notifications, and writes the Pump mode.
+ * Lifecycle, driven by the app's foreground state (see useBucket):
+ *  - start(): if we have a stored bond, auto-connect (and keep retrying);
+ *             otherwise scan. Scanning auto-pairs when it sees the board
+ *             advertising its bonding marker (user pressed SW1 on the board).
+ *  - stop():  stop scanning and disconnect (no background interaction).
+ *  - forget(): drop the stored bond and return to the scanning state.
  */
 import { BleManager, Device, Subscription } from 'react-native-ble-plx';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   BUCKET_SERVICE_UUID,
   DEVICE_NAME,
@@ -16,6 +20,7 @@ import {
   base64ToBytes,
   bytesToBase64,
   decodeLevel,
+  isBondingAdv,
   requestBlePermissions,
 } from '../utils/ble';
 
@@ -28,31 +33,41 @@ export type ConnStatus =
 
 export interface BucketState {
   status: ConnStatus;
+  /** We hold a stored bond for a board (connected or not). */
+  bonded: boolean;
   deviceName: string | null;
   level: LevelStatus | null;
   pumpMode: PumpMode;
-  /** True once the secure Pump characteristic is readable (i.e. bonded). */
-  bonded: boolean;
   error: string | null;
 }
 
 type Listener = (state: BucketState) => void;
 
-const SCAN_TIMEOUT_MS = 15000;
+const STORAGE_KEY = 'bucket.bondedDeviceId';
+const RECONNECT_DELAY_MS = 3000;
+const PAIR_RETRY_MS = 2000;
+const PAIR_RETRIES = 8;
+
+const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
+const delay = (ms: number) => new Promise<void>(r => setTimeout(() => r(), ms));
 
 class BleService {
   private manager = new BleManager();
   private device: Device | null = null;
   private levelSub: Subscription | null = null;
-  private scanTimer: ReturnType<typeof setTimeout> | null = null;
   private listeners = new Set<Listener>();
+
+  private bondedId: string | null = null;
+  private loaded = false;
+  private active = false; // app is in the foreground
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
   private state: BucketState = {
     status: 'idle',
+    bonded: false,
     deviceName: null,
     level: null,
     pumpMode: PumpMode.Auto,
-    bonded: false,
     error: null,
   };
 
@@ -71,90 +86,187 @@ class BleService {
     this.listeners.forEach(l => l(this.state));
   }
 
-  /** Scan for the bucket board and connect to the first match. */
-  async connect(): Promise<void> {
+  // ---- lifecycle ----
+
+  async start(): Promise<void> {
+    this.active = true;
+    if (!this.loaded) {
+      this.bondedId = await AsyncStorage.getItem(STORAGE_KEY);
+      this.loaded = true;
+      this.update({ bonded: this.bondedId !== null });
+    }
     const ok = await requestBlePermissions();
     if (!ok) {
       this.update({ status: 'error', error: 'Bluetooth permissions denied' });
       return;
     }
+    if (this.state.status === 'connected') {
+      return; // already up
+    }
+    if (this.bondedId) {
+      this.tryConnectBonded();
+    } else {
+      this.startScan();
+    }
+  }
 
+  async stop(): Promise<void> {
+    this.active = false;
+    this.clearReconnect();
+    this.manager.stopDeviceScan();
+    await this.teardown();
+    this.update({ status: 'idle', level: null });
+  }
+
+  // ---- scanning (unbonded) ----
+
+  startScan(): void {
+    if (this.bondedId || !this.active) {
+      return;
+    }
+    this.manager.stopDeviceScan(); // guard against a scan already in progress
     this.update({ status: 'scanning', error: null });
-    // Scan unfiltered and match in JS: the OS 128-bit service-UUID filter is
-    // unreliable across devices, and the name may live in the scan response.
-    this.manager.startDeviceScan(null, { allowDuplicates: false }, (error, device) => {
-      if (error) {
-        this.stopScan();
-        this.update({ status: 'error', error: error.message });
+    this.manager.startDeviceScan(null, { allowDuplicates: false }, (err, device) => {
+      if (err) {
+        this.manager.stopDeviceScan();
+        this.update({ status: 'error', error: err.message });
         return;
       }
       if (!device) {
         return;
       }
-      const matches =
+      const isBucket =
         device.name === DEVICE_NAME ||
         device.localName === DEVICE_NAME ||
         device.serviceUUIDs?.includes(BUCKET_SERVICE_UUID);
-      if (matches) {
-        this.stopScan();
-        this.attach(device);
+      // Only auto-pair when the board signals bonding mode (SW1 pressed).
+      if (isBucket && isBondingAdv(device.manufacturerData)) {
+        this.manager.stopDeviceScan();
+        this.autoBond(device);
       }
     });
-
-    this.scanTimer = setTimeout(() => {
-      if (this.state.status === 'scanning') {
-        this.stopScan();
-        this.update({ status: 'error', error: 'Device not found' });
-      }
-    }, SCAN_TIMEOUT_MS);
   }
 
-  private stopScan() {
+  stopScan(): void {
     this.manager.stopDeviceScan();
-    if (this.scanTimer) {
-      clearTimeout(this.scanTimer);
-      this.scanTimer = null;
+    this.update({ status: 'idle' });
+  }
+
+  toggleScan(): void {
+    if (this.state.status === 'scanning') {
+      this.stopScan();
+    } else {
+      this.startScan();
     }
   }
 
-  private async attach(device: Device) {
+  private async autoBond(device: Device): Promise<void> {
     try {
-      this.update({ status: 'connecting', deviceName: device.name ?? device.id });
+      this.update({ status: 'connecting', deviceName: device.name ?? device.id, error: null });
       this.device = await device.connect();
       await this.device.discoverAllServicesAndCharacteristics();
-
-      // Subscribe to Level notifications.
-      this.levelSub = this.device.monitorCharacteristicForService(
-        BUCKET_SERVICE_UUID,
-        LEVEL_CHAR_UUID,
-        (err, char) => {
-          if (err) {
-            this.update({ status: 'error', error: err.message });
-            return;
-          }
-          if (char?.value) {
-            this.update({ level: decodeLevel(base64ToBytes(char.value)) });
-          }
-        },
-      );
-
-      // Notice unexpected disconnects.
+      this.attachLevel();
       this.device.onDisconnected(() => this.handleDisconnect());
+      this.update({ status: 'connected' });
 
-      // Don't touch the encrypted Pump characteristic here: on an unbonded
-      // link that would trigger an OS pairing attempt and (outside the board's
-      // bonding window) drop the connection. The user bonds explicitly via
-      // bond()/the "Pair" button. Level notifications work without bonding.
-      this.update({ status: 'connected', error: null });
+      // Reading the secure Pump char triggers OS pairing; it errors while the
+      // Android prompt is up, so retry to give the user time to confirm.
+      let ok = false;
+      for (let i = 0; i < PAIR_RETRIES; i++) {
+        if (await this.readPump()) {
+          ok = true;
+          break;
+        }
+        if (this.state.status !== 'connected') {
+          break; // link dropped
+        }
+        await delay(PAIR_RETRY_MS);
+      }
+
+      if (ok) {
+        this.bondedId = device.id;
+        await AsyncStorage.setItem(STORAGE_KEY, device.id);
+        this.update({ bonded: true, error: null });
+      } else {
+        this.update({
+          error: 'Pairing not completed — keep the board in bonding mode and confirm the prompt.',
+        });
+        await this.teardown();
+        this.resumeScanSoon();
+      }
     } catch (e) {
-      this.update({
-        status: 'error',
-        error: e instanceof Error ? e.message : String(e),
-      });
+      this.update({ status: 'error', error: msg(e) });
+      this.resumeScanSoon();
     }
   }
 
-  /** Read the (secure) Pump characteristic. Triggers pairing when unbonded. */
+  private resumeScanSoon(): void {
+    this.clearReconnect();
+    this.reconnectTimer = setTimeout(() => this.startScan(), RECONNECT_DELAY_MS);
+  }
+
+  // ---- bonded auto-connect ----
+
+  private async tryConnectBonded(): Promise<void> {
+    if (!this.active || !this.bondedId) {
+      return;
+    }
+    this.update({ status: 'connecting', error: null });
+    try {
+      // autoConnect: Android (re)connects whenever the device is in range.
+      this.device = await this.manager.connectToDevice(this.bondedId, {
+        autoConnect: true,
+      });
+      await this.device.discoverAllServicesAndCharacteristics();
+      this.attachLevel();
+      this.device.onDisconnected(() => this.handleDisconnect());
+      await this.readPump(); // bonded link encrypts automatically
+      this.update({
+        status: 'connected',
+        deviceName: this.device.name ?? this.device.id,
+        error: null,
+      });
+    } catch {
+      this.scheduleReconnect();
+    }
+  }
+
+  private scheduleReconnect(): void {
+    this.clearReconnect();
+    if (!this.active || !this.bondedId) {
+      return;
+    }
+    this.update({ status: 'connecting' });
+    this.reconnectTimer = setTimeout(() => this.tryConnectBonded(), RECONNECT_DELAY_MS);
+  }
+
+  private clearReconnect(): void {
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+  }
+
+  // ---- shared ----
+
+  private attachLevel(): void {
+    if (!this.device) {
+      return;
+    }
+    this.levelSub = this.device.monitorCharacteristicForService(
+      BUCKET_SERVICE_UUID,
+      LEVEL_CHAR_UUID,
+      (err, char) => {
+        if (err) {
+          return; // disconnects are handled by onDisconnected
+        }
+        if (char?.value) {
+          this.update({ level: decodeLevel(base64ToBytes(char.value)) });
+        }
+      },
+    );
+  }
+
   private async readPump(): Promise<boolean> {
     if (!this.device) {
       return false;
@@ -167,39 +279,12 @@ class BleService {
       if (pump?.value) {
         this.update({ pumpMode: base64ToBytes(pump.value)[0] as PumpMode });
       }
-      this.update({ bonded: true });
       return true;
     } catch {
-      this.update({ bonded: false });
       return false;
     }
   }
 
-  /**
-   * Bond with the board: reading the secure Pump attribute makes the OS pair.
-   * Only works while the board's bonding window is open (`bond` / SW1), and the
-   * user must confirm the Android system pairing dialog. The first read often
-   * errors while that dialog is up, so retry for a bit to let pairing settle.
-   */
-  async bond(): Promise<void> {
-    this.update({ error: null });
-    for (let i = 0; i < 6; i++) {
-      if (await this.readPump()) {
-        return;
-      }
-      if (this.state.status !== 'connected') {
-        break; // link dropped
-      }
-      await new Promise<void>(r => setTimeout(() => r(), 2000));
-    }
-    this.update({
-      error:
-        'Pairing failed — put the board in bonding mode (run `bond` or press SW1), ' +
-        'tap Pair, and confirm the Android pairing prompt.',
-    });
-  }
-
-  /** Set the pump mode (auto / force-off / force-on). */
   async setPumpMode(mode: PumpMode): Promise<void> {
     if (!this.device) {
       return;
@@ -212,34 +297,51 @@ class BleService {
       );
       this.update({ pumpMode: mode });
     } catch (e) {
-      this.update({ error: e instanceof Error ? e.message : String(e) });
+      this.update({ error: msg(e) });
     }
   }
 
-  async disconnect(): Promise<void> {
-    this.stopScan();
+  async forget(): Promise<void> {
+    this.bondedId = null;
+    await AsyncStorage.removeItem(STORAGE_KEY);
+    this.clearReconnect();
+    await this.teardown();
+    this.update({
+      bonded: false,
+      status: 'idle',
+      level: null,
+      pumpMode: PumpMode.Auto,
+      error: null,
+    });
+    this.startScan();
+  }
+
+  private async teardown(): Promise<void> {
     this.levelSub?.remove();
     this.levelSub = null;
-    if (this.device) {
+    const d = this.device;
+    this.device = null;
+    if (d) {
       try {
-        await this.device.cancelConnection();
+        await d.cancelConnection();
       } catch {
         /* already gone */
       }
     }
-    this.handleDisconnect();
   }
 
-  private handleDisconnect() {
+  private handleDisconnect(): void {
     this.levelSub?.remove();
     this.levelSub = null;
     this.device = null;
-    this.update({ status: 'idle', deviceName: null, level: null, bonded: false });
-  }
-
-  destroy() {
-    this.disconnect();
-    this.manager.destroy();
+    this.update({ level: null });
+    if (!this.active) {
+      this.update({ status: 'idle' });
+    } else if (this.bondedId) {
+      this.scheduleReconnect(); // keep trying while the app is open
+    } else {
+      this.startScan();
+    }
   }
 }
 

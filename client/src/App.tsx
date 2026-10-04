@@ -22,7 +22,7 @@ const STATUS_COLOR: Record<string, string> = {
 function App() {
   const bucket = useBucket();
   const connected = bucket.status === 'connected';
-  const busy = bucket.status === 'scanning' || bucket.status === 'connecting';
+  const scanning = bucket.status === 'scanning';
 
   return (
     <SafeAreaView style={styles.container}>
@@ -37,53 +37,56 @@ function App() {
       </View>
 
       <ScrollView style={styles.content}>
-        {/* Live sections are hidden until connected, so placeholder values
-            can't be mistaken for real readings. */}
-        {connected ? (
+        {bucket.bonded ? (
           <>
-            <StatusCard level={bucket.level} />
+            {connected ? (
+              <>
+                <StatusCard level={bucket.level} />
+                <PumpControl
+                  pumpMode={bucket.pumpMode}
+                  pumpOn={bucket.level?.pumpOn ?? false}
+                  disabled={false}
+                  onChange={bucket.setPumpMode}
+                />
+              </>
+            ) : (
+              <View style={styles.card}>
+                <Text style={styles.cardTitle}>Board</Text>
+                <Text style={styles.bigValue}>Connecting…</Text>
+                <Text style={styles.subValue}>
+                  Will connect automatically when the board is in range.
+                </Text>
+              </View>
+            )}
 
-            <PumpControl
-              pumpMode={bucket.pumpMode}
-              pumpOn={bucket.level?.pumpOn ?? false}
-              disabled={!bucket.bonded}
-              onChange={bucket.setPumpMode}
-            />
-
-            {!bucket.bonded ? (
-              <TouchableOpacity style={styles.primaryButton} onPress={bucket.bond}>
-                <Text style={styles.buttonText}>Pair to control pump</Text>
-              </TouchableOpacity>
-            ) : null}
+            {/* Shown whenever bonded, connected or not. */}
+            <TouchableOpacity style={styles.forgetButton} onPress={bucket.forget}>
+              <Text style={styles.buttonText}>Forget Board</Text>
+            </TouchableOpacity>
           </>
-        ) : null}
-
-        {connected ? (
-          <TouchableOpacity style={styles.dangerButton} onPress={bucket.disconnect}>
-            <Text style={styles.buttonText}>Disconnect</Text>
-          </TouchableOpacity>
         ) : (
-          <TouchableOpacity
-            style={styles.primaryButton}
-            disabled={busy}
-            onPress={bucket.connect}>
-            <Text style={styles.buttonText}>
-              {busy ? 'Searching…' : 'Connect to board'}
-            </Text>
-          </TouchableOpacity>
+          <>
+            <TouchableOpacity style={styles.primaryButton} onPress={bucket.toggleScan}>
+              <Text style={styles.buttonText}>
+                {scanning ? 'Stop Scanning' : 'Scan'}
+              </Text>
+            </TouchableOpacity>
+
+            {scanning ? (
+              <Text style={styles.hint}>
+                Scanning for the board…{'\n\n'}
+                To pair, press the button (SW1) on the Nucleo board. Pairing
+                starts automatically, then confirm the Android prompt.
+              </Text>
+            ) : (
+              <Text style={styles.hint}>
+                Tap Scan, then press SW1 on the board to pair.
+              </Text>
+            )}
+          </>
         )}
 
-        {bucket.error ? (
-          <Text style={styles.errorText}>{bucket.error}</Text>
-        ) : null}
-
-        {!connected && !busy ? (
-          <Text style={styles.hint}>
-            Power the board and tap Connect. The app scans for the “BucketEvac”
-            BLE service, then shows live water level and lets you override the
-            pump.
-          </Text>
-        ) : null}
+        {bucket.error ? <Text style={styles.errorText}>{bucket.error}</Text> : null}
       </ScrollView>
     </SafeAreaView>
   );
