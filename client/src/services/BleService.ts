@@ -46,7 +46,7 @@ type Listener = (state: BucketState) => void;
 const STORAGE_KEY = 'bucket.bondedDeviceId';
 const RECONNECT_DELAY_MS = 3000;
 const PAIR_RETRY_MS = 2000;
-const PAIR_RETRIES = 8;
+const PAIR_RETRIES = 20; // ~40 s: time for the user to confirm the OS prompt
 
 const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const delay = (ms: number) => new Promise<void>(r => setTimeout(() => r(), ms));
