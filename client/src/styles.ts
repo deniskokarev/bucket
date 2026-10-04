@@ -138,4 +138,8 @@ export const styles = {
     marginTop: 24,
     lineHeight: 20,
   },
+
+  dim: {
+    opacity: 0.35,
+  },
 };
