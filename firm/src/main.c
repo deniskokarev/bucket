@@ -11,6 +11,7 @@
 #include "pump.h"
 
 #include <zephyr/bluetooth/bluetooth.h>
+#include <zephyr/bluetooth/conn.h>
 #include <zephyr/bluetooth/uuid.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
@@ -32,6 +33,54 @@ static const struct bt_data sd[] = {
 	BT_DATA(BT_DATA_NAME_COMPLETE, CONFIG_BT_DEVICE_NAME, sizeof(CONFIG_BT_DEVICE_NAME) - 1),
 };
 
+static int start_adv(void)
+{
+	int err = bt_le_adv_start(BT_LE_ADV_CONN_FAST_1, ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
+	if (err == 0) {
+		LOG_INF("advertising as \"%s\"", CONFIG_BT_DEVICE_NAME);
+	}
+	return err;
+}
+
+/*
+ * Re-advertising is deferred to the system workqueue: restarting from inside
+ * the disconnected callback fails with -ENOMEM on the WB controller because the
+ * connection object isn't freed yet. Retry until a slot is available.
+ */
+static void adv_work_handler(struct k_work *work)
+{
+	int err = start_adv();
+	if (err == -ENOMEM || err == -EAGAIN) {
+		k_work_reschedule(k_work_delayable_from_work(work), K_MSEC(100));
+	} else if (err) {
+		LOG_ERR("advertising start failed (%d)", err);
+	}
+}
+
+static K_WORK_DELAYABLE_DEFINE(adv_work, adv_work_handler);
+
+static void on_connected(struct bt_conn *conn, uint8_t err)
+{
+	if (err) {
+		LOG_ERR("connection failed (0x%02x)", err);
+		return;
+	}
+	LOG_INF("central connected");
+}
+
+static void on_disconnected(struct bt_conn *conn, uint8_t reason)
+{
+	/* Connectable advertising stops on connect; restart it (deferred) so the
+	 * board is discoverable again after the central goes away. */
+	LOG_INF("central disconnected (reason 0x%02x), re-advertising", reason);
+	k_work_reschedule(&adv_work, K_MSEC(50));
+}
+
+BT_CONN_CB_DEFINE(conn_cbs) = {
+	.connected = on_connected,
+	.disconnected = on_disconnected,
+};
+
 static void bt_bringup(void)
 {
 	int err = bt_enable(NULL);
@@ -43,12 +92,9 @@ static void bt_bringup(void)
 	}
 	LOG_INF("Bluetooth controller ready");
 
-	err = bt_le_adv_start(BT_LE_ADV_CONN_FAST_1, ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
-	if (err) {
-		LOG_ERR("advertising start failed (%d)", err);
-		return;
+	if (start_adv() != 0) {
+		k_work_reschedule(&adv_work, K_MSEC(100));
 	}
-	LOG_INF("advertising as \"%s\"", CONFIG_BT_DEVICE_NAME);
 }
 
 int main(void)
