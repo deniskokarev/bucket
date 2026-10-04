@@ -79,6 +79,19 @@ class AndroidClient:
         r = self._run("install", "-r", apk, timeout=180)
         if r.returncode != 0 or "Success" not in (r.stdout or ""):
             raise RuntimeError(f"adb install failed:\n{r.stdout}\n{r.stderr}")
+        self.grant_permissions()
+
+    def grant_permissions(self) -> None:
+        """Pre-grant the runtime permissions BLE scanning needs, so a fresh
+        install doesn't block on the location/Bluetooth prompt."""
+        for p in (
+            "android.permission.ACCESS_FINE_LOCATION",
+            "android.permission.ACCESS_COARSE_LOCATION",
+            "android.permission.BLUETOOTH_SCAN",
+            "android.permission.BLUETOOTH_CONNECT",
+        ):
+            # Harmlessly fails for perms that aren't runtime-grantable on this API.
+            self._run("shell", "pm", "grant", self.package, p)
 
     def is_running(self) -> bool:
         return bool(self.shell("pidof", self.package).strip())
@@ -233,19 +246,21 @@ class AndroidClient:
                       f"tap={tap_kw} want_text={want_text} want_contains={want_contains} "
                       f"want_regex={want_regex} gone_text={gone_text}")
 
-    def confirm_pairing(self, timeout: float = 20) -> bool:
-        """Tap the Android system 'PAIR' dialog if/when it appears.
+    def confirm_pairing(self, timeout: float = 30) -> bool:
+        """Auto-accept the Android 'Bluetooth pairing request' if it appears.
 
-        Returns True if it was tapped, False if no dialog showed (e.g. the OS
-        already holds the bond, so no new pairing is needed).
+        Returns True if tapped. No-op (returns False) when the bond already
+        exists and the app reconnects seamlessly (no prompt).
         """
         deadline = time.time() + timeout
         while time.time() < deadline:
-            n = self.find(regex=r"(?i)^pair$")
-            if n is not None:
-                self.tap_node(n)
+            if self.has(contains="Forget Board"):
+                return False  # already connected seamlessly
+            pair = self.find(regex=r"(?i)^pair$")
+            if pair is not None and self.find(regex=r"(?i)^cancel$") is not None:
+                self.tap_node(pair)
                 return True
-            time.sleep(1.0)
+            time.sleep(1.5)
         return False
 
     def screenshot(self, path: str) -> str:

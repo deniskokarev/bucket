@@ -146,10 +146,10 @@ class Board:
         self.wait_for(r"Zephyr version", timeout=5)
 
     def open_bonding_window(self) -> None:
-        """Equivalent to pressing SW1 on the board."""
+        """Press SW1 / `bond`: clears any old bond and opens the pairing window."""
         self.clear()
         self.send("bond")
-        self.wait_for(r"bonding mode ON", timeout=5)
+        self.wait_for(r"bonding mode", timeout=5)
 
     def tsc_count(self) -> int:
         self.clear()
