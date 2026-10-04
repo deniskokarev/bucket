@@ -11,18 +11,17 @@ Boot the WB55 with the **TSC** capacitive sensor and the **Bluetooth**
 controller initialized, plus an interactive **shell**. Verified on hardware:
 
 ```
-uart:~$ device list
-...
 - tsc@40024000 (READY)          <- TSC peripheral up
 - water_key (READY)             <- tsc-keys input device up
-uart:~$ kernel version
-Zephyr version 4.5.0-rc1
+hci_ipm: CPU2 wireless FW: v1.24.0 (INFO_STACK_TYPE_BLE_HCI_EXT_ADV)
+main: Bluetooth controller ready
+main: advertising as "BucketEvac"
 ```
 
-> **BT note:** `bt_enable()` currently returns `-19` because the Nucleo's M0+
-> wireless coprocessor ships an **old stack (v1.13.2; Zephyr 4.5 expects
-> v1.24.0)**. The application-core BT host builds and runs fine; BLE will come
-> up once the coprocessor stack is upgraded — see *Wireless coprocessor* below.
+> **BT note (resolved):** the board originally shipped an old M0+ stack (v1.13.2)
+> and `bt_enable()` returned `-19`. We updated the coprocessor to the **HCI-Only
+> extended v1.24.0** stack — see [*Wireless coprocessor*](#wireless-coprocessor-for-ble).
+> BLE now comes up and advertises.
 
 ## Toolchain
 
@@ -117,8 +116,11 @@ This builds as a normal CMake project. The firm `CMakeLists.txt` defaults
 
 ## Wireless coprocessor (for BLE)
 
-The WB55 BLE stack runs on the Cortex-M0+ as an ST-signed binary. If
-`bt_enable()` fails with a version mismatch, upgrade FUS + the BLE stack once,
-out of band, with **STM32CubeProgrammer** (the stack binaries ship in
-STM32CubeWB, `Projects/STM32WB_Copro_Wireless_Binaries`). This does not touch
-our M4 application flash.
+The WB55 BLE controller runs on the Cortex-M0+ as an ST-signed binary. This
+board shipped an old stack (v1.13.2) so `bt_enable()` returns `-19`; Zephyr 4.5
+wants the **HCI-Only** controller **v1.24.0** (we use the *extended* variant).
+
+Full step-by-step update instructions — **without CubeMX**, via the open-source
+`psdb` tool *or* standalone STM32CubeProgrammer — are in
+[`../docs/ble-coprocessor-update.md`](../docs/ble-coprocessor-update.md). The
+update does not touch our M4 application flash.

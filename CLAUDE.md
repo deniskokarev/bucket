@@ -90,12 +90,14 @@ preferred path; keep flashing on one tool to avoid confusion.
 - `~/venv` is **Python 3.14** — very new. `west` works; if a Zephyr Python
   dependency ever fails to install, that's the first suspect.
 - STM32WB is **dual-core**. We only build/flash the Cortex-M4 application core.
-  The BLE stack runs on the M0+ via a pre-flashed ST wireless coprocessor
-  binary (FUS + stack). **Observed on this board:** `bt_enable()` returns `-19`
-  and the log shows `hci_ipm: CPU2 wireless FW mismatch: found v1.13.2,
-  expected v1.24.0`. The M4 BT host is fine; BLE needs a one-time coprocessor
-  upgrade (FUS + BLE stack) via STM32CubeProgrammer using the binaries from
-  STM32CubeWB (`Projects/STM32WB_Copro_Wireless_Binaries`). Out of band; does
-  not touch our app flash.
+  The BLE controller runs on the M0+ via a pre-flashed ST wireless coprocessor
+  binary. **Resolved on this board (2026-10-03):** it shipped WS v1.13.2 →
+  `bt_enable()` returned `-19`; updated to **HCI-Only extended v1.24.0**
+  (`INFO_STACK_TYPE_BLE_HCI_EXT_ADV`) at `0x080DC000` via STM32CubeProgrammer CLI
+  (FUS stayed 1.2.0). BLE now advertises. Procedure (CubeProgrammer CLI used;
+  open-source `psdb` alternative, whose bundled binary DB stops at ~1.13.3 so it
+  needs a from-source patch under `~/gnu`) is in `docs/ble-coprocessor-update.md`.
+  Caveat: any CubeProgrammer FUS op flashes an 8 KB `FUS_Operator` to
+  `0x08000000`, erasing app sectors [0 1] — **re-flash the app afterward**.
 - TSC acquisition values drift with temperature/humidity — hence hysteresis and
   (eventually) a baseline-tracking filter rather than a fixed threshold.
