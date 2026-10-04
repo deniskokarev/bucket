@@ -1,6 +1,7 @@
 #include "bond.h"
 #include "adv.h"
 
+#include <string.h>
 #include <zephyr/bluetooth/conn.h>
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/kernel.h>
@@ -27,6 +28,9 @@ static K_WORK_DELAYABLE_DEFINE(window_work, window_close);
 
 void bond_start_window(void)
 {
+	/* Open the window WITHOUT clearing existing bonds, so a return visit from
+	 * an already-paired phone reconnects seamlessly (no new OS pairing prompt).
+	 * Use `bond clear` to drop bonds when switching to a different phone. */
 	atomic_set(&window_open, 1);
 	bt_set_bonding_adv(true); /* advertise the marker so the app auto-pairs */
 	k_work_reschedule(&window_work, K_SECONDS(BOND_WINDOW_SECONDS));
@@ -136,12 +140,17 @@ int bond_init(void)
 
 static int cmd_bond(const struct shell *sh, size_t argc, char **argv)
 {
-	ARG_UNUSED(argc);
-	ARG_UNUSED(argv);
+	if (argc > 1 && strcmp(argv[1], "clear") == 0) {
+		int err = bt_unpair(BT_ID_DEFAULT, NULL); /* remove all bonds (recovery) */
+		shell_print(sh, "cleared all bonds (%d)", err);
+		return 0;
+	}
 	bond_start_window();
 	shell_print(sh, "bonding mode ON for %d s — read the secure Pump attribute to pair",
 		    BOND_WINDOW_SECONDS);
 	return 0;
 }
 
-SHELL_CMD_REGISTER(bond, NULL, "Open the bonding window (accept new pairings) for 60s", cmd_bond);
+SHELL_CMD_REGISTER(bond, NULL,
+		   "Open the bonding window for 60s (same as SW1); `bond clear` drops all bonds",
+		   cmd_bond);
