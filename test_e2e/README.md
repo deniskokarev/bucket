@@ -25,7 +25,8 @@ bonding/control pipeline works.
 02 bond            board SW1/`bond` -> app auto-pairs -> secure connection
 03 gatt read       app shows live Level data ("raw TSC")
 04 gatt write      app pump On/Auto reaches the board (pump mode -> N)
-05 disconnect      backgrounding the app drops the link
+05 disconnect      backgrounding stops notifications at once; the link drops
+                   after the app's 2 min grace (a short trip away keeps it)
 06 reconnect       foregrounding auto-connects (bonded)
 07 gatt read       live data again after reconnect
 08 forget          back to the unbonded/scanning state

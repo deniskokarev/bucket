@@ -15,6 +15,7 @@ import serial  # pyserial (installed in ~/venv)
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _DEFAULT_HEX = os.path.join(_HERE, "..", "firm", "build", "zephyr", "zephyr.hex")
+_DEFAULT_DTS = os.path.join(_HERE, "..", "firm", "build", "zephyr", "zephyr.dts")
 
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")
 
@@ -146,7 +147,7 @@ class Board:
         self.wait_for(r"Zephyr version", timeout=5)
 
     def open_bonding_window(self) -> None:
-        """Press SW1 / `bond`: clears any old bond and opens the pairing window."""
+        """Press SW1 / `bond`: open the pairing window (existing bonds are kept)."""
         self.clear()
         self.send("bond")
         self.wait_for(r"bonding mode", timeout=5)
@@ -155,3 +156,32 @@ class Board:
         self.clear()
         self.send("tsc")
         return int(self.wait_for(r"g1 count = (\d+)", timeout=5).group(1))
+
+    def bond_count(self) -> int:
+        self.clear()
+        self.send("bt bonds")
+        return int(self.wait_for(r"Total (\d+)", timeout=5).group(1))
+
+    @staticmethod
+    def _storage_partition(dts_path: str | None = None) -> tuple[str, int, int]:
+        """(flash controller node, offset, size) of `storage_partition` in the build."""
+        with open(dts_path or _DEFAULT_DTS) as f:
+            dts = f.read()
+        ctrl = re.search(r"\b(flash-controller@[0-9a-f]+)\s*\{", dts)
+        part = re.search(r"storage_partition:\s*partition@[0-9a-f]+\s*\{[^}]*?"
+                         r"reg\s*=\s*<\s*(0x[0-9a-f]+)\s+(0x[0-9a-f]+)\s*>", dts)
+        if not ctrl or not part:
+            raise RuntimeError("storage_partition not found in zephyr.dts (build firm/ first)")
+        return ctrl.group(1), int(part.group(1), 16), int(part.group(2), 16)
+
+    def wipe_settings(self) -> None:
+        """Erase the settings (bonds) partition and cold-reboot the board."""
+        ctrl, off, size = self._storage_partition()
+        self.clear()
+        self.send(f"flash erase {ctrl} {off:#x} {size:#x}")
+        self.wait_for(r"Erase success", timeout=10)
+        self.clear()
+        self.send("kernel reboot cold")
+        self.wait_for(r"advertising as", timeout=15)
+        self.ping()
+        assert self.bond_count() == 0, "bonds survived the settings wipe"
