@@ -73,8 +73,9 @@ export function base64ToBytes(b64: string): Uint8Array {
 
 /**
  * The board sets manufacturer data [0xFF, 0xFF, 1] while its bonding window is
- * open (SW1 pressed / `bond`). The app only auto-pairs when it sees this, so
- * the user initiates bonding from the board. `mfg` is the base64 from ble-plx.
+ * open (SW1 short-short-long / `bond`). The app only auto-pairs when it sees
+ * this, so the user initiates bonding from the board. `mfg` is the base64 from
+ * ble-plx.
  */
 export function isBondingAdv(mfg: string | null | undefined): boolean {
   if (!mfg) {

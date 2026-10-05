@@ -38,10 +38,11 @@ Advertised device name: **`BucketEvac`**.
 
 The app drives everything from its foreground state (no background work):
 
-- **Unbonded:** scans on open (**Scan / Stop Scanning** button). When you press
-  **SW1** on the board, it advertises a *bonding marker*; the app then
-  auto-connects and pairs (confirm the Android prompt). The marker is why it
-  pairs on *your* button press, not on mere discovery.
+- **Unbonded:** scans on open (**Scan / Stop Scanning** button). On the board,
+  press **SW1 short, short, long** (hold the last press ~2 s): the board clears
+  its old bonds and advertises a *bonding marker* for 60 s (its blue LED
+  glows); the app then auto-connects and pairs (confirm the Android prompt).
+  The marker is why it pairs on *your* button press, not on mere discovery.
 - **Bonded:** on open it **auto-connects** to the stored board and keeps
   retrying while in range (persisted in AsyncStorage). A red **Forget Board**
   button is always shown; it returns the app to the unbonded/scanning state.
@@ -54,8 +55,15 @@ The app drives everything from its foreground state (no background work):
   still bounds the power drain. Closing the app disconnects immediately.
 
 The bond itself persists on the board (NVS) and in the OS. "Forget Board" clears
-the app's record; the OS/board keys remain, so re-pairing later is seamless
-(remove the OS bond in Android Settings for a full reset).
+only the app's record. Pairing again with SW1 short-short-long clears the
+board's keys too, so the phone's stored keys go stale: on the next connect
+Android gets "key missing", deletes its own bond, and the app pairs from scratch
+(verified in e2e step 09). Unpairing in Android Settings works the same way
+(step 10).
+
+After such a link drop Android may report service discovery as successful but
+empty (the earlier discovery is still pending); the app then drops the link and
+reconnects instead of retrying GATT reads on that link.
 
 > ⚠️ The firmware does not expose this custom service **yet** (it currently only
 > advertises + DIS). The app will connect but see no bucket characteristics

@@ -4,7 +4,7 @@
  * Lifecycle, driven by the app's foreground state (see useBucket):
  *  - start(): if we have a stored bond, auto-connect (and keep retrying);
  *             otherwise scan. Scanning auto-pairs when it sees the board
- *             advertising its bonding marker (user pressed SW1 on the board).
+ *             advertising its bonding marker (user entered SW1 short-short-long).
  *  - background(): stop scanning and Level notifications at once, then keep
  *             the link for BACKGROUND_GRACE_MS before disconnecting.
  *  - stop():  stop scanning and disconnect immediately.
@@ -57,11 +57,17 @@ const STORAGE_KEY = 'bucket.bondedDeviceId';
 const RECONNECT_DELAY_MS = 3000;
 const PAIR_RETRY_MS = 2000;
 const PAIR_RETRIES = 20; // ~40 s: time for the user to confirm the OS prompt
+// Rediscovering on the same link doesn't help once Android returned an empty
+// database (see discover()); a fresh connection does, so give up fast.
+const DISCOVER_RETRIES = 2;
+const DISCOVER_RETRY_MS = 1000;
 // Must exceed the pairing window above (see the header comment).
 const BACKGROUND_GRACE_MS = 2 * 60 * 1000;
 
 const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const delay = (ms: number) => new Promise<void>(r => setTimeout(() => r(), ms));
+// Shows in logcat as ReactNativeJS (debug builds); e2e failure dumps include it.
+const log = (...args: unknown[]) => console.log('[ble]', ...args);
 
 class BleService {
   private manager = new BleManager();
@@ -105,6 +111,7 @@ class BleService {
   // ---- lifecycle ----
 
   async start(): Promise<void> {
+    log('start', { device: !!this.device, linking: this.linking, bonded: !!this.bondedId });
     this.active = true;
     this.clearGrace();
     if (!this.loaded) {
@@ -130,6 +137,7 @@ class BleService {
   }
 
   background(): void {
+    log('background', { device: !!this.device, linking: this.linking });
     this.active = false;
     this.scanning = false;
     this.clearReconnect();
@@ -142,6 +150,7 @@ class BleService {
     this.levelSub = null;
     this.clearGrace();
     this.graceTimer = setTimeout(() => {
+      log('grace expired');
       this.graceTimer = null;
       this.stop();
     }, BACKGROUND_GRACE_MS);
@@ -161,8 +170,10 @@ class BleService {
   startScan(): void {
     // Keep one scan running; Android throttles scan *restarts* (~5 / 30 s).
     if (this.bondedId || !this.active || this.scanning) {
+      log('startScan skipped', { bonded: !!this.bondedId, active: this.active, scanning: this.scanning, linking: this.linking });
       return;
     }
+    log('startScan', { linking: this.linking });
     this.scanning = true;
     this.clearReconnect();
     this.update({ status: 'scanning', error: null });
@@ -187,8 +198,9 @@ class BleService {
         device.name === DEVICE_NAME ||
         device.localName === DEVICE_NAME ||
         device.serviceUUIDs?.includes(BUCKET_SERVICE_UUID);
-      // Only auto-pair when the board signals bonding mode (SW1 pressed).
+      // Only auto-pair when the board signals bonding mode (SW1 code entered).
       if (isBucket && isBondingAdv(device.manufacturerData)) {
+        log('bonding marker seen', device.id);
         this.scanning = false;
         this.manager.stopDeviceScan();
         this.autoBond(device);
@@ -211,11 +223,13 @@ class BleService {
   }
 
   private async autoBond(device: Device): Promise<void> {
+    log('autoBond start', device.id, { linking: this.linking });
     this.linking = true;
     try {
       this.update({ status: 'connecting', deviceName: device.name ?? device.id, error: null });
       this.device = await device.connect();
-      await this.device.discoverAllServicesAndCharacteristics();
+      log('autoBond connected');
+      await this.discover();
       this.attachLevel();
       this.disconnectSub = this.device.onDisconnected(() => this.handleDisconnect());
       this.update({ status: 'connected' });
@@ -229,10 +243,12 @@ class BleService {
           break;
         }
         if (this.state.status !== 'connected') {
+          log('autoBond: link dropped during pairing', { attempt: i });
           break; // link dropped
         }
         await delay(PAIR_RETRY_MS);
       }
+      log('autoBond result', { ok });
 
       if (ok) {
         this.bondedId = device.id;
@@ -246,7 +262,11 @@ class BleService {
         this.resumeScanSoon();
       }
     } catch (e) {
+      log('autoBond error', msg(e));
       this.update({ status: 'error', error: msg(e) });
+      // Drop the link if it's still up: the board stops advertising (and its
+      // bonding marker) while connected, so a rescan could never find it.
+      await this.teardown();
       this.resumeScanSoon();
     } finally {
       this.linking = false;
@@ -265,6 +285,7 @@ class BleService {
       return;
     }
     this.update({ status: 'connecting', error: null });
+    log('tryConnectBonded', this.bondedId);
     this.linking = true;
     try {
       // autoConnect: Android (re)connects whenever the device is in range.
@@ -275,7 +296,7 @@ class BleService {
         await this.stop(); // connected after the grace period ran out
         return;
       }
-      await this.device.discoverAllServicesAndCharacteristics();
+      await this.discover();
       this.attachLevel();
       this.disconnectSub = this.device.onDisconnected(() => this.handleDisconnect());
       await this.readPump(); // bonded link encrypts automatically
@@ -284,7 +305,9 @@ class BleService {
         deviceName: this.device.name ?? this.device.id,
         error: null,
       });
-    } catch {
+    } catch (e) {
+      log('tryConnectBonded error', msg(e));
+      await this.teardown(); // a half-open link would block the next attempt
       this.scheduleReconnect();
     } finally {
       this.linking = false;
@@ -315,6 +338,34 @@ class BleService {
   }
 
   // ---- shared ----
+
+  /*
+   * Discover services and make sure the Bucket service is there. Android can
+   * report discovery as successful with an empty database: right after a link
+   * drop (e.g. the stack deleting a stale bond on "key missing") the previous
+   * discovery is still pending, the new one is refused (GATT_BUSY) and an
+   * empty cache is returned. Every GATT op then fails with "service not found"
+   * and pairing never starts. Retrying on the same link keeps returning the
+   * empty database, so the caller drops the link and reconnects.
+   */
+  private async discover(): Promise<void> {
+    for (let i = 0; ; i++) {
+      const d = this.device;
+      if (!d) {
+        throw new Error('disconnected during service discovery');
+      }
+      await d.discoverAllServicesAndCharacteristics();
+      const services = await d.services();
+      if (services.some(s => s.uuid.toLowerCase() === BUCKET_SERVICE_UUID)) {
+        return;
+      }
+      log('discover: Bucket service missing, retrying', { attempt: i, found: services.length });
+      if (i + 1 >= DISCOVER_RETRIES) {
+        throw new Error('Bucket service not found on the board');
+      }
+      await delay(DISCOVER_RETRY_MS);
+    }
+  }
 
   private attachLevel(): void {
     if (!this.device || !this.active || this.levelSub) {
@@ -347,7 +398,8 @@ class BleService {
         this.update({ pumpMode: base64ToBytes(pump.value)[0] as PumpMode });
       }
       return true;
-    } catch {
+    } catch (e) {
+      log('readPump failed', msg(e));
       return false;
     }
   }
@@ -385,7 +437,7 @@ class BleService {
 
   private async teardown(): Promise<void> {
     this.clearGrace();
-    // Remove the disconnect watcher first
+    // Remove the disconnect watcher first so an *intentional* teardown
     // (stop/forget) doesn't trigger handleDisconnect's reconnect/rescan.
     this.disconnectSub?.remove();
     this.disconnectSub = null;
@@ -394,6 +446,7 @@ class BleService {
     const d = this.device;
     this.device = null;
     if (d) {
+      log('teardown: cancelConnection', d.id, { linking: this.linking });
       try {
         await d.cancelConnection();
       } catch {
@@ -403,6 +456,7 @@ class BleService {
   }
 
   private handleDisconnect(): void {
+    log('disconnected', { active: this.active, bonded: !!this.bondedId, linking: this.linking });
     this.clearGrace();
     this.disconnectSub?.remove();
     this.disconnectSub = null;

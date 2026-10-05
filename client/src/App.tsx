@@ -91,12 +91,13 @@ function App() {
             {scanning ? (
               <Text style={styles.hint}>
                 Scanning for the board…{'\n\n'}
-                To pair, press the button (SW1) on the Nucleo board. Pairing
-                starts automatically, then confirm the Android prompt.
+                To pair, on the Nucleo board press SW1 short, short, long
+                (hold the last press ~2 s). Pairing starts automatically, then
+                confirm the Android prompt.
               </Text>
             ) : (
               <Text style={styles.hint}>
-                Tap Scan, then press SW1 on the board to pair.
+                Tap Scan, then press SW1 on the board short, short, long to pair.
               </Text>
             )}
           </>
