@@ -18,6 +18,9 @@ if(NOT DEFINED BOARD_DEBUG_RUNNER)
   set(BOARD_DEBUG_RUNNER openocd)
 endif()
 
+# Out-of-tree drivers (morse-button, signal-led) live in a Zephyr module.
+list(APPEND ZEPHYR_EXTRA_MODULES ${CMAKE_CURRENT_LIST_DIR}/drivers)
+
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(bucket C)
 
@@ -28,4 +31,5 @@ target_sources(app PRIVATE
   src/tsc.c
   src/gatt.c
   src/bond.c
+  src/ui.c
 )

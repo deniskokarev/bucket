@@ -2,8 +2,8 @@
 #include "adv.h"
 
 #include <string.h>
+#include <zephyr/bluetooth/bluetooth.h>
 #include <zephyr/bluetooth/conn.h>
-#include <zephyr/drivers/gpio.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/shell/shell.h>
@@ -14,29 +14,73 @@ LOG_MODULE_REGISTER(bond, LOG_LEVEL_INF);
 #define BOND_WINDOW_SECONDS 60
 
 static atomic_t window_open; /* 1 while new pairings are accepted */
+static bond_event_cb_t event_cb;
 
-/* Runs in the system workqueue (thread context) so BT APIs are safe. */
-static void window_close(struct k_work *work)
+static void notify(enum bond_event ev)
 {
-	ARG_UNUSED(work);
-	atomic_set(&window_open, 0);
-	bt_set_bonding_adv(false);
-	LOG_INF("bonding window closed");
+	if (event_cb) {
+		event_cb(ev);
+	}
 }
 
-static K_WORK_DELAYABLE_DEFINE(window_work, window_close);
-
-void bond_start_window(void)
+/* Close the window if it is open; true if this call closed it. Callers race
+ * (timeout vs. pairing result), so exactly one of them reports. */
+static bool close_window(void)
 {
-	/* Open the window WITHOUT clearing existing bonds, so a return visit from
-	 * an already-paired phone reconnects seamlessly (no new OS pairing prompt).
-	 * Use `bond clear` to drop bonds when switching to a different phone. */
+	if (!atomic_cas(&window_open, 1, 0)) {
+		return false;
+	}
+	bt_set_bonding_adv(false);
+	return true;
+}
+
+/* Runs in the system workqueue (thread context) so BT APIs are safe. */
+static void window_timeout(struct k_work *work)
+{
+	ARG_UNUSED(work);
+	if (close_window()) {
+		LOG_INF("bonding window closed (timeout)");
+		notify(BOND_EV_WINDOW_TIMEOUT);
+	}
+}
+
+static K_WORK_DELAYABLE_DEFINE(window_work, window_timeout);
+
+static void count_bond(const struct bt_bond_info *info, void *user_data)
+{
+	ARG_UNUSED(info);
+	(*(int *)user_data)++;
+}
+
+bool bond_exists(void)
+{
+	int n = 0;
+
+	bt_foreach_bond(BT_ID_DEFAULT, count_bond, &n);
+	return n > 0;
+}
+
+bool bond_window_is_open(void)
+{
+	return atomic_get(&window_open) != 0;
+}
+
+void bond_rebond(void)
+{
+	/* Clear first so the board always re-pairs from scratch: a phone that
+	 * dropped its keys (OS-side unpair) can pair again, and the window only
+	 * ever ends with exactly the newly paired phone bonded. Connected peers
+	 * are disconnected by bt_unpair(). */
+	int err = bt_unpair(BT_ID_DEFAULT, NULL);
+
+	LOG_INF("cleared all bonds (%d)", err);
 	atomic_set(&window_open, 1);
 	bt_set_bonding_adv(true); /* advertise the marker so the app auto-pairs */
 	k_work_reschedule(&window_work, K_SECONDS(BOND_WINDOW_SECONDS));
-	LOG_INF("bonding mode: accepting new pairings for %d s "
+	LOG_INF("bonding mode: accepting a new pairing for %d s "
 		"(read the secure Pump attribute from the client)",
 		BOND_WINDOW_SECONDS);
+	notify(BOND_EV_WINDOW_OPEN);
 }
 
 /* ---- pairing callbacks ---- */
@@ -53,7 +97,7 @@ static enum bt_security_err pairing_accept(struct bt_conn *conn,
 		return BT_SECURITY_ERR_SUCCESS;
 	}
 
-	LOG_WRN("pairing rejected: not in bonding mode (run `bond` or press SW1)");
+	LOG_WRN("pairing rejected: not in bonding mode (SW1 short-short-long or `bond`)");
 	return BT_SECURITY_ERR_PAIR_NOT_ALLOWED;
 }
 #endif
@@ -71,15 +115,22 @@ static void pairing_complete(struct bt_conn *conn, bool bonded)
 	bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
 	LOG_INF("pairing complete: %s (bonded=%d)", addr, bonded);
 	/* One successful bond per window. */
-	atomic_set(&window_open, 0);
-	k_work_cancel_delayable(&window_work);
-	bt_set_bonding_adv(false);
+	if (close_window()) {
+		k_work_cancel_delayable(&window_work);
+		notify(BOND_EV_PAIRED);
+	}
 }
 
 static void pairing_failed(struct bt_conn *conn, enum bt_security_err reason)
 {
 	ARG_UNUSED(conn);
 	LOG_WRN("pairing failed (reason %d)", reason);
+	/* Only a failure inside the window is the user's pairing attempt; outside
+	 * it, it's a rejected stranger and must not change the UI. */
+	if (close_window()) {
+		k_work_cancel_delayable(&window_work);
+		notify(BOND_EV_FAILED);
+	}
 }
 
 static struct bt_conn_auth_info_cb auth_info_cb = {
@@ -87,55 +138,16 @@ static struct bt_conn_auth_info_cb auth_info_cb = {
 	.pairing_failed = pairing_failed,
 };
 
-/* ---- bond button (SW1 / PC4, via EXTI) ---- */
-
-static const struct gpio_dt_spec bond_btn =
-	GPIO_DT_SPEC_GET(DT_PATH(zephyr_user), bond_gpios);
-static struct gpio_callback btn_cb_data;
-
-static void btn_work_handler(struct k_work *work)
+int bond_init(bond_event_cb_t cb)
 {
-	ARG_UNUSED(work);
-	bond_start_window();
-}
+	int err;
 
-static K_WORK_DEFINE(btn_work, btn_work_handler);
-
-static void btn_isr(const struct device *port, struct gpio_callback *cb, uint32_t pins)
-{
-	ARG_UNUSED(port);
-	ARG_UNUSED(cb);
-	ARG_UNUSED(pins);
-	/* Defer out of the EXTI ISR. */
-	k_work_submit(&btn_work);
-}
-
-static int setup_button(void)
-{
-	if (!gpio_is_ready_dt(&bond_btn)) {
-		LOG_ERR("bond button GPIO not ready");
-		return -ENODEV;
+	event_cb = cb;
+	err = bt_conn_auth_cb_register(&auth_cb);
+	if (err) {
+		return err;
 	}
-
-	int ret = gpio_pin_configure_dt(&bond_btn, GPIO_INPUT);
-	if (ret < 0) {
-		return ret;
-	}
-	ret = gpio_pin_interrupt_configure_dt(&bond_btn, GPIO_INT_EDGE_TO_ACTIVE);
-	if (ret < 0) {
-		return ret;
-	}
-	gpio_init_callback(&btn_cb_data, btn_isr, BIT(bond_btn.pin));
-	gpio_add_callback(bond_btn.port, &btn_cb_data);
-	LOG_INF("bond button (EXTI) ready on %s pin %d", bond_btn.port->name, bond_btn.pin);
-	return 0;
-}
-
-int bond_init(void)
-{
-	bt_conn_auth_cb_register(&auth_cb);
-	bt_conn_auth_info_cb_register(&auth_info_cb);
-	return setup_button();
+	return bt_conn_auth_info_cb_register(&auth_info_cb);
 }
 
 /* ---- shell ---- */
@@ -147,12 +159,13 @@ static int cmd_bond(const struct shell *sh, size_t argc, char **argv)
 		shell_print(sh, "cleared all bonds (%d)", err);
 		return 0;
 	}
-	bond_start_window();
+	bond_rebond();
 	shell_print(sh, "bonding mode ON for %d s — read the secure Pump attribute to pair",
 		    BOND_WINDOW_SECONDS);
 	return 0;
 }
 
 SHELL_CMD_REGISTER(bond, NULL,
-		   "Open the bonding window for 60s (same as SW1); `bond clear` drops all bonds",
+		   "Clear bonds and open the bonding window for 60s (same as SW1 "
+		   "short-short-long); `bond clear` only drops all bonds",
 		   cmd_bond);

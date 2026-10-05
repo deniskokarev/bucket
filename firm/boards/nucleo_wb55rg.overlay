@@ -8,6 +8,9 @@
  *      and CMSIS headers:
  *        TSC @ 0x40024000, IRQ 39, RCC AHB1 bit 16 (TSCEN/TSCRST).
  *   2. Declare the `pump` GPIO output.
+ *   3. Board UI: SW1 as a morse button (codes below) and LED1 (blue, PB5)
+ *      as the signal LED. PB5 has no timer PWM output on the WB55, so the
+ *      signal-led driver uses software PWM on the GPIO.
  *
  * TSC pin choice (Group 1, all free on this board — LEDs=PB0/1/5,
  * USART1=PB6/7, I2C1=PB8/9, SPI1/TIM on PAx):
@@ -16,6 +19,7 @@
  * Adjust to your wiring; keep sampling-io and channel-ios in the same group.
  */
 
+#include <zephyr/dt-bindings/input/input-event-codes.h>
 #include <zephyr/dt-bindings/input/stm32-tsc-defines.h>
 
 / {
@@ -32,16 +36,29 @@
 		};
 	};
 
-	zephyr,user {
-		/* SW1 (PC4), owned directly for the bonding-mode EXTI handler
-		 * (see src/bond.c). The board's gpio-keys node is disabled below
-		 * so it doesn't also claim this pin. */
-		bond-gpios = <&gpioc 4 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
-	};
-};
+	/* SW1 (gpio-keys INPUT_KEY_0) decoded as morse codes. No `input`
+	 * phandle: listen to any device so `input report` can inject presses
+	 * from the shell (e2e). */
+	sw1_morse: sw1-morse {
+		compatible = "dkv,morse-button";
+		input-code = <INPUT_KEY_0>;
+		long-press-ms = <2000>;
+		reset-delay-ms = <1500>;
 
-&{/gpio_keys} {
-	status = "disabled";
+		morse_status: status {
+			code = ".";
+			label = "show status";
+		};
+		morse_rebond: rebond {
+			code = "..-";
+			label = "clear bonds and pair";
+		};
+	};
+
+	status_led: status-led {
+		compatible = "dkv,signal-led";
+		gpios = <&gpiob 5 GPIO_ACTIVE_HIGH>;
+	};
 };
 
 /* The WB `soc` node is unlabeled; extend it by path to add the TSC. */

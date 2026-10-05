@@ -11,6 +11,7 @@
 #include "gatt.h"
 #include "level.h"
 #include "pump.h"
+#include "ui.h"
 
 #include <zephyr/bluetooth/bluetooth.h>
 #include <zephyr/bluetooth/conn.h>
@@ -128,9 +129,13 @@ static void bt_bringup(void)
 	if (IS_ENABLED(CONFIG_SETTINGS)) {
 		settings_load(); /* restore stored bonds */
 	}
-	if (bond_init() != 0) {
+	if (bond_init(ui_on_bond_event) != 0) {
 		LOG_ERR("bond init failed");
 	}
+	if (ui_init() != 0) {
+		LOG_ERR("ui init failed");
+	}
+	ui_show_status();
 
 	if (start_adv() != 0) {
 		k_work_reschedule(&adv_work, K_MSEC(100));
