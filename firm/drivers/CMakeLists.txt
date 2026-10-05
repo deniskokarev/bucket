@@ -1,0 +1,4 @@
+zephyr_include_directories(include)
+
+add_subdirectory_ifdef(CONFIG_MORSE_BUTTON morse_button)
+add_subdirectory_ifdef(CONFIG_SIGNAL_LED signal_led)

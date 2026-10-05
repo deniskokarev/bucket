@@ -1,0 +1,17 @@
+config SIGNAL_LED
+	bool "Signal LED (solid / blink / sine glow)"
+	default y
+	depends on DT_HAS_DKV_SIGNAL_LED_ENABLED
+	select GPIO
+	select PWM
+	help
+	  Coded feedback LED patterns on a PWM LED, or on a plain GPIO LED
+	  using software PWM.
+
+if SIGNAL_LED
+
+module = SIGNAL_LED
+module-str = signal_led
+source "subsys/logging/Kconfig.template.log_config"
+
+endif

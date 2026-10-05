@@ -1,0 +1,22 @@
+config MORSE_BUTTON
+	bool "Morse-code button decoder"
+	default y
+	depends on DT_HAS_DKV_MORSE_BUTTON_ENABLED
+	select INPUT
+	help
+	  Decode press/release timing of one input key into dot/dash
+	  sequences and dispatch the codes listed in the devicetree.
+
+if MORSE_BUTTON
+
+config MORSE_BUTTON_MAX_SYMBOLS
+	int "Longest code sequence"
+	default 8
+	help
+	  Sequences longer than this are discarded as unmatched.
+
+module = MORSE_BUTTON
+module-str = morse_button
+source "subsys/logging/Kconfig.template.log_config"
+
+endif

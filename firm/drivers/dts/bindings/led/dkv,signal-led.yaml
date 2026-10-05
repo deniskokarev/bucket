@@ -1,0 +1,31 @@
+description: |
+  Signal LED: one LED showing coded feedback patterns (off, solid, blink,
+  sine glow), each optionally for a limited time.
+
+  Give either `pwms` (hardware PWM) or `gpios` (plain GPIO, driven with
+  software PWM for intermediate brightness).
+
+    status_led: status-led {
+        compatible = "dkv,signal-led";
+        gpios = <&gpiob 5 GPIO_ACTIVE_HIGH>;
+    };
+
+compatible: "dkv,signal-led"
+
+include: base.yaml
+
+properties:
+  pwms:
+    type: phandle-array
+    description: PWM channel driving the LED.
+
+  gpios:
+    type: phandle-array
+    description: GPIO driving the LED (software PWM).
+
+  soft-pwm-hz:
+    type: int
+    default: 100
+    description: |
+      Software PWM frequency when driven through `gpios`. Keep it above the
+      visible flicker threshold (~80 Hz).

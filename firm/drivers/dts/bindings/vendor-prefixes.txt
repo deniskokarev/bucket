@@ -1,0 +1,2 @@
+# Vendor prefixes for the out-of-tree bindings in this module.
+dkv	Denis Kokarev

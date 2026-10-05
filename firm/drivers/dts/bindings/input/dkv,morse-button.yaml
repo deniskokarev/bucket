@@ -1,0 +1,74 @@
+description: |
+  Morse-code button.
+
+  Decodes the press/release timing of one input key (e.g. a gpio-keys button)
+  into a sequence of dots (short press) and dashes (long press). Each child
+  node declares one code; when a released sequence matches a code, the
+  handler the application registered for that entry is called.
+
+  A code fires on the release that completes it, unless it is also the
+  prefix of a longer code; then it fires once the button has been idle for
+  reset-delay-ms. Idle time also ends (resets) any sequence in progress.
+
+  Example: tap to show status, short-short-long to re-pair.
+
+    sw1_morse: sw1-morse {
+        compatible = "dkv,morse-button";
+        input-code = <INPUT_KEY_0>;
+        long-press-ms = <2000>;
+        reset-delay-ms = <1500>;
+
+        morse_status: status {
+            code = ".";
+            label = "show status";
+        };
+        morse_rebond: rebond {
+            code = "..-";
+            label = "clear bonds and pair";
+        };
+    };
+
+  Application code binds a handler per entry at boot:
+
+    morse_button_set_handler(MORSE_BUTTON_DEV(DT_NODELABEL(morse_rebond)),
+                             MORSE_BUTTON_ENTRY(DT_NODELABEL(morse_rebond)),
+                             on_rebond, NULL);
+
+compatible: "dkv,morse-button"
+
+include: base.yaml
+
+properties:
+  input:
+    type: phandle
+    description: |
+      Input device whose events are decoded. If omitted, events from any
+      device are decoded, which also lets `input report` from the shell
+      inject presses for testing.
+
+  input-code:
+    type: int
+    required: true
+    description: Key code to decode, e.g. INPUT_KEY_0.
+
+  long-press-ms:
+    type: int
+    default: 2000
+    description: A press at least this long is a dash; shorter is a dot.
+
+  reset-delay-ms:
+    type: int
+    default: 1500
+    description: |
+      Idle time after a release that ends the current sequence.
+
+child-binding:
+  description: One code and the action it stands for.
+  properties:
+    code:
+      type: string
+      required: true
+      description: Sequence of "." (short) and "-" (long) presses.
+    label:
+      type: string
+      description: Human-readable action name, used in logs.

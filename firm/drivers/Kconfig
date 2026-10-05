@@ -1,0 +1,6 @@
+menu "Bucket out-of-tree drivers"
+
+rsource "morse_button/Kconfig"
+rsource "signal_led/Kconfig"
+
+endmenu
