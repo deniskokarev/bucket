@@ -8,34 +8,57 @@ bonding/control pipeline works.
 
 - **`Board`** (`board.py`) — the firmware over serial. A reader thread buffers
   the Zephyr shell/log so tests can `wait_for(<regex>)` while sending shell
-  commands. Helpers: `install()` (flash the current build via OpenOCD), `ping()`,
-  `open_bonding_window()` (== pressing SW1), `tsc_count()`.
+  commands, and keeps a full `transcript()`. Helpers: `install()` (flash the
+  current build via OpenOCD), `ping()`, `morse(code)` (enter a SW1 code by
+  injecting key events with real timing via `input report`),
+  `open_bonding_window()` (SW1 `..-`), `bond_count()`, `wipe_settings()` (erase
+  the bonds partition + cold reboot), `tsc_count()`.
 - **`AndroidClient`** (`android.py`) — the app over adb. Dumps and parses the
   uiautomator XML to **find buttons by text and tap their center** (no hard-coded
-  coordinates), so UI behavior is validated too. Helpers: `install()` (reinstall
-  the debug APK), `is_installed()`, `relaunch()`, `home()`/`foreground()`
+  coordinates), so UI behavior is validated too. Helpers: `install()` /
+  `uninstall()`, `is_installed()`, `relaunch()`, `home()`/`foreground()`
   (background/restore), `tap_text()`, `wait_for()`, `confirm_pairing()` (taps the
-  Android system PAIR dialog), `screenshot()`.
+  Android system PAIR dialog), `unpair_os()` / `is_os_bonded()` (Settings >
+  Bluetooth), `screenshot()`, `dump_logcat()`.
 
 ## Pipeline (`test_pipeline.py`, ordered, failfast)
 
 ```
 00 preconditions   board shell alive, app installed + running
 01 forget          ensure we start unbonded (scanning)
-02 bond            board SW1/`bond` -> app auto-pairs -> secure connection
+02 bond            SW1 "..-" (board clears bonds, LED glows) -> app auto-pairs
+                   -> secure connection, LED solid
 03 gatt read       app shows live Level data ("raw TSC")
 04 gatt write      app pump On/Auto reaches the board (pump mode -> N)
+04b no accidental  ".", "..", "-", ".-", "-..-" keep the bond and the link
 05 disconnect      backgrounding stops notifications at once; the link drops
                    after the app's 2 min grace (a short trip away keeps it)
 06 reconnect       foregrounding auto-connects (bonded)
 07 gatt read       live data again after reconnect
 08 forget          back to the unbonded/scanning state
+09 re-pair         after app Forget: "..-" clears the board's keys; the phone's
+                   stale keys fail ("key missing"), Android drops them, pairs again
+10 OS unpair       Settings > Bluetooth > Unpair, app Forget, "..-" -> pairs again
 ```
+
+Steps 05–07 currently fail: React Native freezes JS timers while the app is in
+the background, so the grace-period disconnect never fires (pending a board-side
+idle timeout).
 
 Each step is its own `test_NN_*` method; ordering comes from the numeric
 prefixes and `-f` (failfast) stops the run at the first failure. On failure the
-test prints the **on-screen text**, the **board serial tail**, and saves a
-**screenshot** to `artifacts/`.
+test prints the **on-screen text** and the **board serial tail**, and saves to
+`artifacts/`: a **screenshot**, the full **board transcript**, and the phone's
+**logcat** (the app logs its BLE flow with a `[ble]` tag).
+
+**Standard outcome:** `tearDownClass` (even after a failure) unpairs the phone
+in Settings, uninstalls the app, erases the board's bonds partition and
+cold-reboots it (the board must then show `led: no-bond`). Every run therefore
+starts from a first-time pairing. `BUCKET_KEEP_STATE=1` skips this for
+debugging.
+
+Don't edit `client/src` while a run is in progress: Metro hot-applies the
+change, which creates a second BLE service instance inside the running app.
 
 ## Run
 
@@ -52,8 +75,8 @@ With `BUCKET_INSTALL=1`, setup calls `Board.install()` (OpenOCD flash) and
 ### Prerequisites
 
 - Nucleo-WB55RG on USB (flashed with the Bucket firmware).
-- An adb device with the `com.bucketclient` app installed (`cd ../client &&
-  npm run android`), screen unlocked.
+- An adb device (the debug APK is installed if missing; build it once with
+  `cd ../client && npm run android`), screen lock set to None/Swipe.
 - `~/venv` Python with `pyserial`.
 
 ### Env overrides
@@ -68,17 +91,17 @@ With `BUCKET_INSTALL=1`, setup calls `Board.install()` (OpenOCD flash) and
 
 ## Pairing
 
-`bond`/SW1 opens the pairing window but does **not** clear existing bonds, so a
-returning phone reconnects seamlessly (encryption via stored keys, no prompt).
-The app-side "forget" only drops the app's record, so `test_02` normally
-re-connects with no dialog.
+On the board, SW1 short-short-long (`..-`, or shell `bond`) **clears all bonds**
+and opens a 60 s pairing window; the tests enter it via `Board.morse()`. A
+returning, still-bonded phone reconnects at any time with its stored keys,
+without the window.
 
-When a fresh pairing *is* required (e.g. after `bond clear` or a new phone),
-Android shows a "Pair" prompt — `test_02` **auto-accepts it via adb**
+Every pairing in the pipeline is therefore a fresh one, and Android shows a
+"Pair" prompt; the tests **auto-accept it via adb**
 (`AndroidClient.confirm_pairing`). Auto-confirming the pairing is fine for a
 dedicated e2e test device.
 
-To switch to a different phone / recover a mismatched bond: shell `bond clear`.
+`bond clear` drops the board's bonds without opening the window.
 
 ## Notes
 

@@ -284,6 +284,13 @@ class AndroidClient:
             f.write(data)
         return path
 
+    def dump_logcat(self, path: str) -> str:
+        """Save the device log buffer (threadtime) to `path`."""
+        out = self._run("logcat", "-d", "-v", "threadtime", timeout=60).stdout
+        with open(path, "w") as f:
+            f.write(out)
+        return path
+
     # ---- OS Bluetooth bonds (system Settings) ----
 
     def is_os_bonded(self, name: str) -> bool:

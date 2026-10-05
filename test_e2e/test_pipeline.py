@@ -4,18 +4,25 @@ Ordered sequence (method name prefixes enforce order; run with -f/failfast):
 
     00 preconditions
     01 forget         -> ensure we start unbonded (scanning)
-    02 bond           -> SW1/`bond` + app auto-pairs -> connected
+    02 bond           -> SW1 "..-" (clears board bonds, LED glows) + app
+                         auto-pairs -> connected, LED solid
     03 gatt read      -> app shows live Level data
     04 gatt write     -> app pump control reaches the board
+    04b no accidental -> other SW1 presses (".", "..", "-", ".-", "-..-")
+        unbond           keep the bond and the link
     05 disconnect     -> backgrounding silences notifications; the link drops
                          after the 2 min grace (a short trip away keeps it)
     06 reconnect      -> foregrounding auto-connects (bonded)
     07 gatt read      -> live data again after reconnect
     08 forget         -> back to the unbonded/scanning state
-    09 re-pair        -> after the app's Forget (OS + board bonds kept):
-                         SW1 -> seamless re-pair -> encrypted write works
+    09 re-pair        -> after the app's Forget (the phone keeps its OS bond):
+                         "..-" clears the board's keys -> pairs again ->
+                         encrypted write works
     10 OS unpair      -> Settings > Bluetooth > Unpair, app Forget, then
-                         SW1 -> fresh pairing prompt -> encrypted write works
+                         "..-" -> fresh pairing prompt -> encrypted write works
+
+SW1 presses are injected over the board shell (`input report`) with real
+timing, so the firmware's morse decoder runs as for a physical press.
 
 Standard outcome (tearDownClass, even on failure): the phone is unpaired in
 Settings and the app uninstalled; the board's settings partition (bonds) is
@@ -93,18 +100,29 @@ class PipelineTest(unittest.TestCase):
     # ---- verbose failure helper ----
 
     def fail_verbose(self, msg: str):
-        shot = os.path.join(ARTIFACTS, f"fail_{self._testMethodName}.png")
-        try:
-            self.app.screenshot(shot)
-        except Exception as e:
-            shot = f"(screenshot failed: {e})"
+        base = os.path.join(ARTIFACTS, f"fail_{self._testMethodName}")
+        saved = []
+        for what, save in (("screenshot", lambda: self.app.screenshot(base + ".png")),
+                           ("logcat", lambda: self.app.dump_logcat(base + "_logcat.log")),
+                           ("board", lambda: self._write(base + "_board.log",
+                                                         self.board.transcript()))):
+            try:
+                saved.append(save())
+            except Exception as e:
+                saved.append(f"({what} failed: {e})")
         ui = "\n  ".join(self.app.safe_texts())
         self.fail(
             f"{msg}\n"
             f"=== on-screen text ===\n  {ui}\n"
             f"=== board serial (tail) ===\n{self.board.log_tail()}\n"
-            f"=== screenshot: {shot} ===\n"
+            f"=== artifacts ===\n  " + "\n  ".join(saved) + "\n"
         )
+
+    @staticmethod
+    def _write(path: str, text: str) -> str:
+        with open(path, "w") as f:
+            f.write(text)
+        return path
 
     def _unbonded(self) -> bool:
         return self.app.has(text=SCAN) or self.app.has(text=STOP_SCANNING)
@@ -143,14 +161,20 @@ class PipelineTest(unittest.TestCase):
         raise UiError("forget did not return to scanning", self.app.safe_texts())
 
     def _bond_via_sw1(self):
-        """Scan, open the board's bonding window, accept the OS prompt if any."""
+        """Scan, enter SW1 "..-" (board clears bonds), accept the OS prompt."""
         self._ensure_scanning()
         self.board.open_bonding_window()
         self.app.confirm_pairing(timeout=30)
         try:
             self.board.wait_for(r"central connected", timeout=60)
+            self.board.wait_for(r"pairing complete", timeout=60)
+            self.board.wait_for(r"led: bonded", timeout=5)
         except AssertionError as e:
-            self.fail_verbose(f"board did not report a connection: {e}")
+            self.fail_verbose(f"board did not pair: {e}")
+        try:
+            self.app.wait_for(contains="Disconnect & Forget Board", timeout=45)
+        except UiError as e:
+            self.fail_verbose(f"app did not reach the bonded/connected UI: {e}")
         try:
             self.app.wait_for(contains="Disconnect & Forget Board", timeout=45)
         except UiError as e:
@@ -207,6 +231,28 @@ class PipelineTest(unittest.TestCase):
     def test_04_gatt_write(self):
         self._assert_secure_write()
 
+    def test_04b_no_accidental_unbond(self):
+        # Only short-short-long re-bonds. A tap shows the status; anything else
+        # is unmatched. None of it may touch the bond or the link.
+        self.assertEqual(self.board.bond_count(), 1, "expected exactly one bond")
+        for code, outcome in ((".", r"led: bonded"),
+                              ("..", r'unmatched "\.\."'),
+                              ("-", r'unmatched "-"'),
+                              (".-", r'unmatched "\.-"'),
+                              ("-..-", r'unmatched "-\.\.-"')):
+            self.board.clear()
+            self.board.morse(code)
+            try:
+                self.board.wait_for(outcome, timeout=6)
+            except AssertionError as e:
+                self.fail_verbose(f"SW1 {code!r}: expected /{outcome}/: {e}")
+            log = self.board.snapshot()
+            for bad in ("cleared all bonds", "bonding mode", "central disconnected"):
+                if bad in log:
+                    self.fail_verbose(f"SW1 {code!r} must not cause {bad!r}")
+        self.assertEqual(self.board.bond_count(), 1, "bond lost to a non-rebond code")
+        self._assert_secure_write()
+
     def test_05_disconnect(self):
         # Backgrounding silences notifications at once but keeps the link for
         # the app's grace period (the Android pairing prompt backgrounds the
@@ -257,8 +303,9 @@ class PipelineTest(unittest.TestCase):
             self.fail_verbose(f"did not return to unbonded/scanning after forget: {e}")
 
     def test_09_repair_after_app_forget(self):
-        # The app's Forget drops only its own record; the OS and board keep the
-        # bond, so re-pairing re-encrypts with the stored keys (no prompt).
+        # The app's Forget drops only its own record; the phone keeps its OS
+        # bond. "..-" clears the board's keys, so the phone's stored keys go
+        # stale and it has to pair again.
         if not self.app.has(text=STOP_SCANNING) and not self.app.has(text=SCAN):
             self._forget()
         self.assertTrue(self.app.is_os_bonded(DEVICE_NAME), "OS bond should survive app Forget")
@@ -267,8 +314,8 @@ class PipelineTest(unittest.TestCase):
 
     def test_10_repair_after_os_unpair(self):
         # Unpair from the OS side (user removes it in Settings): the phone loses
-        # its keys while the board keeps its own. The app's record is stale too,
-        # so Forget it, then pair again from scratch (OS prompt expected).
+        # its keys. The app's record is stale too, so Forget it, then "..-"
+        # (which clears the board's keys) and pair from scratch.
         self.app.unpair_os(DEVICE_NAME)
         self.assertFalse(self.app.is_os_bonded(DEVICE_NAME), "OS unpair did not take")
         self.app.foreground()

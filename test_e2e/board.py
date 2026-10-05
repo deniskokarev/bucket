@@ -38,6 +38,7 @@ class Board:
         self.baud = baud
         self.ser: serial.Serial | None = None
         self._buf = ""
+        self._log: list[str] = []  # full transcript; clear() doesn't touch it
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._reader: threading.Thread | None = None
@@ -105,8 +106,10 @@ class Board:
             except Exception:
                 break
             if data:
+                text = _strip(data.decode(errors="replace"))
                 with self._lock:
-                    self._buf += _strip(data.decode(errors="replace"))
+                    self._buf += text
+                    self._log.append(text)
 
     # ---- buffer ----
 
@@ -120,6 +123,11 @@ class Board:
 
     def log_tail(self, n: int = 1500) -> str:
         return self.snapshot()[-n:]
+
+    def transcript(self) -> str:
+        """Everything read from the board since open()."""
+        with self._lock:
+            return "".join(self._log)
 
     # ---- commands / assertions ----
 
@@ -147,10 +155,26 @@ class Board:
         self.wait_for(r"Zephyr version", timeout=5)
 
     def open_bonding_window(self) -> None:
-        """Press SW1 / `bond`: open the pairing window (existing bonds are kept)."""
+        """SW1 short-short-long: clear the board's bonds, open the pairing window."""
         self.clear()
-        self.send("bond")
-        self.wait_for(r"bonding mode", timeout=5)
+        self.morse("..-")
+        self.wait_for(r"bonding mode", timeout=10)
+        self.wait_for(r"led: pairing", timeout=5)
+
+    # Press timing for morse(): well inside the firmware's 2 s long-press and
+    # 1.5 s idle-reset thresholds (boards/nucleo_wb55rg.overlay, sw1-morse).
+    DOT_S, DASH_S, GAP_S = 0.3, 2.6, 0.4
+
+    def morse(self, code: str) -> None:
+        """Enter a SW1 code ("." short, "-" long) by injecting key events with
+        real timing through the input shell, so the board's decoder runs as
+        for a physical press."""
+        for i, sym in enumerate(code):
+            if i:
+                time.sleep(self.GAP_S)
+            self.send("input report 1 11 1")  # INPUT_EV_KEY, INPUT_KEY_0, pressed
+            time.sleep(self.DOT_S if sym == "." else self.DASH_S)
+            self.send("input report 1 11 0")
 
     def tsc_count(self) -> int:
         self.clear()
@@ -182,6 +206,7 @@ class Board:
         self.wait_for(r"Erase success", timeout=10)
         self.clear()
         self.send("kernel reboot cold")
+        self.wait_for(r"led: no-bond", timeout=15)  # boot status of a wiped board
         self.wait_for(r"advertising as", timeout=15)
         self.ping()
         assert self.bond_count() == 0, "bonds survived the settings wipe"
