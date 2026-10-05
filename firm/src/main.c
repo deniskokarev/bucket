@@ -77,11 +77,14 @@ static K_WORK_DELAYABLE_DEFINE(adv_work, adv_work_handler);
 
 static void on_connected(struct bt_conn *conn, uint8_t err)
 {
+	char addr[BT_ADDR_LE_STR_LEN];
+
 	if (err) {
 		LOG_ERR("connection failed (0x%02x)", err);
 		return;
 	}
-	LOG_INF("central connected");
+	bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
+	LOG_INF("central connected: %s (sec L%d)", addr, bt_conn_get_security(conn));
 }
 
 static void on_disconnected(struct bt_conn *conn, uint8_t reason)
@@ -92,9 +95,23 @@ static void on_disconnected(struct bt_conn *conn, uint8_t reason)
 	k_work_reschedule(&adv_work, K_MSEC(50));
 }
 
+static void on_security_changed(struct bt_conn *conn, bt_security_t level,
+				enum bt_security_err err)
+{
+	char addr[BT_ADDR_LE_STR_LEN];
+
+	bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
+	if (err) {
+		LOG_WRN("security change failed: %s L%d err %d", addr, level, err);
+	} else {
+		LOG_INF("security changed: %s L%d", addr, level);
+	}
+}
+
 BT_CONN_CB_DEFINE(conn_cbs) = {
 	.connected = on_connected,
 	.disconnected = on_disconnected,
+	.security_changed = on_security_changed,
 };
 
 static void bt_bringup(void)

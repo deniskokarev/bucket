@@ -66,8 +66,10 @@ static const struct bt_conn_auth_cb auth_cb = {
 
 static void pairing_complete(struct bt_conn *conn, bool bonded)
 {
-	ARG_UNUSED(conn);
-	LOG_INF("pairing complete (bonded=%d)", bonded);
+	char addr[BT_ADDR_LE_STR_LEN];
+
+	bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
+	LOG_INF("pairing complete: %s (bonded=%d)", addr, bonded);
 	/* One successful bond per window. */
 	atomic_set(&window_open, 0);
 	k_work_cancel_delayable(&window_work);
