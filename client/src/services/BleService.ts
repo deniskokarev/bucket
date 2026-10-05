@@ -5,8 +5,18 @@
  *  - start(): if we have a stored bond, auto-connect (and keep retrying);
  *             otherwise scan. Scanning auto-pairs when it sees the board
  *             advertising its bonding marker (user pressed SW1 on the board).
- *  - stop():  stop scanning and disconnect (no background interaction).
+ *  - background(): stop scanning and Level notifications at once, then keep
+ *             the link for BACKGROUND_GRACE_MS before disconnecting.
+ *  - stop():  stop scanning and disconnect immediately.
  *  - forget(): drop the stored bond and return to the scanning state.
+ *
+ * Why a grace period instead of disconnecting on background: Android shows the
+ * pairing prompt as a separate system activity, which RN reports as AppState
+ * 'background'. Disconnecting right away aborted every first-time pairing
+ * (the OS finished bonding, but the app had already dropped the link). With
+ * notifications off the idle link costs little, and dropping it after the grace
+ * period still bounds the BLE power drain of a backgrounded app. The grace also
+ * covers other short trips away (notification shade, app switcher).
  */
 import { BleManager, Device, Subscription } from 'react-native-ble-plx';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -47,6 +57,8 @@ const STORAGE_KEY = 'bucket.bondedDeviceId';
 const RECONNECT_DELAY_MS = 3000;
 const PAIR_RETRY_MS = 2000;
 const PAIR_RETRIES = 20; // ~40 s: time for the user to confirm the OS prompt
+// Must exceed the pairing window above (see the header comment).
+const BACKGROUND_GRACE_MS = 2 * 60 * 1000;
 
 const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const delay = (ms: number) => new Promise<void>(r => setTimeout(() => r(), ms));
@@ -62,7 +74,9 @@ class BleService {
   private loaded = false;
   private active = false; // app is in the foreground
   private scanning = false; // a scan is currently running (avoid restarts)
+  private linking = false; // a connect/bond attempt is in flight
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private graceTimer: ReturnType<typeof setTimeout> | null = null;
 
   private state: BucketState = {
     status: 'idle',
@@ -92,6 +106,7 @@ class BleService {
 
   async start(): Promise<void> {
     this.active = true;
+    this.clearGrace();
     if (!this.loaded) {
       this.bondedId = await AsyncStorage.getItem(STORAGE_KEY);
       this.loaded = true;
@@ -102,14 +117,34 @@ class BleService {
       this.update({ status: 'error', error: 'Bluetooth permissions denied' });
       return;
     }
-    if (this.state.status === 'connected') {
-      return; // already up
+    if (this.device || this.linking) {
+      // Link survived the background grace period (or is still coming up).
+      this.attachLevel();
+      return;
     }
     if (this.bondedId) {
       this.tryConnectBonded();
     } else {
       this.startScan();
     }
+  }
+
+  background(): void {
+    this.active = false;
+    this.scanning = false;
+    this.clearReconnect();
+    this.manager.stopDeviceScan();
+    if (!this.device && !this.linking) {
+      this.update({ status: 'idle' });
+      return;
+    }
+    this.levelSub?.remove(); // stop the 5 Hz notifications right away
+    this.levelSub = null;
+    this.clearGrace();
+    this.graceTimer = setTimeout(() => {
+      this.graceTimer = null;
+      this.stop();
+    }, BACKGROUND_GRACE_MS);
   }
 
   async stop(): Promise<void> {
@@ -176,6 +211,7 @@ class BleService {
   }
 
   private async autoBond(device: Device): Promise<void> {
+    this.linking = true;
     try {
       this.update({ status: 'connecting', deviceName: device.name ?? device.id, error: null });
       this.device = await device.connect();
@@ -212,6 +248,8 @@ class BleService {
     } catch (e) {
       this.update({ status: 'error', error: msg(e) });
       this.resumeScanSoon();
+    } finally {
+      this.linking = false;
     }
   }
 
@@ -227,11 +265,16 @@ class BleService {
       return;
     }
     this.update({ status: 'connecting', error: null });
+    this.linking = true;
     try {
       // autoConnect: Android (re)connects whenever the device is in range.
       this.device = await this.manager.connectToDevice(this.bondedId, {
         autoConnect: true,
       });
+      if (!this.active && !this.graceTimer) {
+        await this.stop(); // connected after the grace period ran out
+        return;
+      }
       await this.device.discoverAllServicesAndCharacteristics();
       this.attachLevel();
       this.disconnectSub = this.device.onDisconnected(() => this.handleDisconnect());
@@ -243,6 +286,8 @@ class BleService {
       });
     } catch {
       this.scheduleReconnect();
+    } finally {
+      this.linking = false;
     }
   }
 
@@ -262,10 +307,17 @@ class BleService {
     }
   }
 
+  private clearGrace(): void {
+    if (this.graceTimer) {
+      clearTimeout(this.graceTimer);
+      this.graceTimer = null;
+    }
+  }
+
   // ---- shared ----
 
   private attachLevel(): void {
-    if (!this.device) {
+    if (!this.device || !this.active || this.levelSub) {
       return;
     }
     this.levelSub = this.device.monitorCharacteristicForService(
@@ -332,7 +384,8 @@ class BleService {
   }
 
   private async teardown(): Promise<void> {
-    // Remove the disconnect watcher first so an *intentional* teardown
+    this.clearGrace();
+    // Remove the disconnect watcher first
     // (stop/forget) doesn't trigger handleDisconnect's reconnect/rescan.
     this.disconnectSub?.remove();
     this.disconnectSub = null;
@@ -350,6 +403,7 @@ class BleService {
   }
 
   private handleDisconnect(): void {
+    this.clearGrace();
     this.disconnectSub?.remove();
     this.disconnectSub = null;
     this.levelSub?.remove();

@@ -45,7 +45,13 @@ The app drives everything from its foreground state (no background work):
 - **Bonded:** on open it **auto-connects** to the stored board and keeps
   retrying while in range (persisted in AsyncStorage). A red **Forget Board**
   button is always shown; it returns the app to the unbonded/scanning state.
-- Closing/backgrounding the app disconnects and stops scanning.
+- Backgrounding the app stops scanning and Level notifications immediately,
+  but keeps the BLE link for a **2-minute grace period** before disconnecting;
+  returning within it resumes instantly. Rationale: Android shows the pairing
+  prompt as a separate system activity, which React Native reports as
+  AppState `background` — disconnecting right away aborted every first-time
+  pairing. An idle link without notifications costs little, and the timeout
+  still bounds the power drain. Closing the app disconnects immediately.
 
 The bond itself persists on the board (NVS) and in the OS. "Forget Board" clears
 the app's record; the OS/board keys remain, so re-pairing later is seamless
