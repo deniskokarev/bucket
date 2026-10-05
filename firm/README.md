@@ -113,8 +113,10 @@ This builds as a normal CMake project. The firm `CMakeLists.txt` defaults
 | `src/level.c` | raw count → "water present" with threshold + hysteresis |
 | `src/pump.c`  | pump GPIO with min-run / max-run guards + control mode |
 | `src/gatt.c`  | custom GATT service: Level (read/notify) + secure Pump (read/write) |
-| `src/bond.c`  | pairing window (`bond` shell cmd + SW1/EXTI), secure-access gating |
-| `boards/nucleo_wb55rg.overlay` | TSC node (G1: PB12 Cs / PB13 electrode), `pump` GPIO, SW1 bond button |
+| `src/bond.c`  | bonding window (clear bonds first; `bond` shell cmd), secure-access gating, bond events |
+| `src/ui.c`    | SW1 morse codes → actions; bond state → status LED patterns |
+| `drivers/`    | out-of-tree Zephyr module: `dkv,morse-button` + `dkv,signal-led` drivers and bindings |
+| `boards/nucleo_wb55rg.overlay` | TSC node (G1: PB12 Cs / PB13 electrode), `pump` GPIO, SW1 morse codes, status LED |
 | `boards/nucleo_wb55rg.conf`    | board Kconfig fragment |
 
 ### BLE GATT service
@@ -137,16 +139,47 @@ The Pump characteristic requires an **encrypted (bonded)** link, so pump control
 is only available after pairing; Level/notify stay open. New pairings are
 rejected except during a 60 s **bonding window**, opened by:
 
-- the **`bond`** shell command, or
-- pressing **SW1** (PC4, wired as an EXTI GPIO interrupt).
+- **SW1 short, short, long** (`..-`, the long press ≥ 2 s), or
+- the **`bond`** shell command (same action).
+
+Opening the window **first clears all bonds**, so the board always re-pairs
+from scratch, including a phone that dropped its keys (unpaired in Android
+Settings). Zephyr would otherwise refuse that phone's new Just Works pairing
+over the keys it still holds. The code is deliberately hard to enter by
+accident; `bond clear` drops bonds without opening the window.
 
 While the window is open the board also advertises a **bonding marker**
 (manufacturer data `FF FF 01`) so the app auto-pairs only after the user opens
 the window, not on mere discovery. A client then bonds by **reading the secure
 Pump attribute**, which triggers OS pairing (LE Secure Connections, Just Works).
 Bonds persist in the `storage` flash partition (NVS); bonded centrals reconnect
-encrypted with no re-pairing. Verified end-to-end on Android
+encrypted with no re-pairing and no window. Verified end-to-end on Android
 (`pairing complete (bonded=1)`, secure pump write succeeds).
+
+### Board UI: SW1 codes and the status LED
+
+SW1 is decoded by the `dkv,morse-button` driver: a press shorter than 2 s is a
+dot, longer a dash, and 1.5 s without a press ends the sequence. The codes are
+listed in the overlay (`sw1-morse` node); anything else is logged as unmatched
+and ignored.
+
+| SW1 | Action |
+| --- | --- |
+| `.` (tap) | show the current status on the LED for a minute |
+| `..-` | clear bonds and open the bonding window |
+
+The blue **LED1** (PB5) is a `dkv,signal-led`. PB5 has no timer PWM output, so
+the driver dims it with software PWM (100 Hz) while glowing:
+
+| LED | Meaning |
+| --- | --- |
+| solid, 1 min | bonded (at boot, after a tap, after pairing) |
+| 2 Hz blink, 1 min | no bond (at boot, after a tap) or pairing failed |
+| slow glow (2 s sine) | bonding window open |
+| off | idle, or the window timed out |
+
+Each transition logs `led: <state>`; the e2e tests assert on these lines and
+inject SW1 presses with `input report 1 11 1|0` from the shell.
 
 ## Wireless coprocessor (for BLE)
 

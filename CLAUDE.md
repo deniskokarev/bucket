@@ -70,9 +70,22 @@ preferred path; keep flashing on one tool to avoid confusion.
 - `level.{c,h}` — capacitive level sensing. Consumes TSC acquisitions / input
   events, applies hysteresis, exposes "water above trigger?".
 - `pump.{c,h}` — pump GPIO actuation with a minimum run-time / safety guard.
+- `bond.{c,h}` — bonding window. SW1 `..-` / `bond` **clears all bonds first**,
+  then accepts one new pairing for 60 s; reports bond events.
+- `ui.{c,h}` — SW1 morse codes → actions, bond state → status LED pattern.
+- `firm/drivers/` — out-of-tree Zephyr module (vendor prefix `dkv`, hooked in via
+  `ZEPHYR_EXTRA_MODULES` in `firm/CMakeLists.txt`):
+  - `dkv,morse-button` — input-subsystem filter decoding one key into
+    dot/dash codes listed as child DT nodes; handlers bound per entry at boot,
+    run on the module's own `dkv_wq` workqueue (never the system workqueue,
+    which the BT host uses — don't block it).
+  - `dkv,signal-led` — off/solid/blink/sine-glow LED patterns with a duration,
+    on `pwms` or a plain GPIO (software PWM).
 - Devicetree:
   - `boards/nucleo_wb55rg.overlay` — TSC node config (sampling caps + sensing
-    channel for the electrode) and the `pump` GPIO alias. **Pin assignments
+    channel for the electrode), the `pump` GPIO alias, the SW1 morse codes
+    (`sw1-morse`) and the status LED (`status-led`, blue LED1/PB5 — no timer PWM
+    on that pin, hence software PWM). **Pin assignments
     here are experimental and must be checked against the actual wiring and the
     STM32WB datasheet TSC group map.**
   - `boards/nucleo_wb55rg.conf` — board-specific Kconfig fragment.
