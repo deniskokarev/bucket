@@ -3,12 +3,33 @@
 How to characterize the STM32 TSC water-level sensing on a **bare Nucleo-WB55RG**
 (no bucket yet), pick the sampling capacitor, and set firmware thresholds.
 
-Working assumption for this doc (to be ground-truthed with an LCR meter):
+## 0. Measured electrode capacitance (bench experiment)
 
-| Bucket state | Electrode capacitance `Cx` |
+Measured on a mock tank — plastic box **100 × 100 × 70 mm**, **2 mm** walls,
+with two **25 mm-wide copper-foil** strips glued as horizontal bands at
+mid-height on adjacent faces, meeting at a corner with a **~2 mm gap** (the two
+bands are the two TSC electrodes; water between/behind them is the dielectric):
+
+| Tank state | `Cx` (LCR meter) |
 | --- | --- |
-| Empty | **~50 pF** |
-| Full  | **~250 pF** (5× empty) |
+| Empty | **~2 pF** |
+| Half (water to mid-band) | **~18 pF** |
+| Full | **~34 pF** |
+
+Reasoning for a real bucket: a larger tank widens the band separation but also
+grows the band area — both scale ~linearly, so the **dry** value should stay
+similar (~2 pF), while **full** may be a bit higher. Taking the wall thickness
+(≤ ~4 mm) as the limiting series dielectric, the practical range to design for is
+about **2 → 20 pF** (with full possibly to ~34 pF).
+
+> **Parasitics matter at this scale.** The TSC channel pin + wiring add a few pF
+> (Cpar ≈ 3–10 pF) *in parallel* with the electrode, so the TSC effectively sees
+> `Cx + Cpar`. That raises the "empty" floor (helpful — fewer counts, more
+> max-count headroom) and compresses the relative swing. Measure the bare-pin
+> baseline first (see §8) to back out Cpar.
+
+Earlier revisions of this doc assumed ~50–250 pF; the numbers below are redone
+for the measured 2–34 pF.
 
 ## 1. How the TSC count behaves
 
@@ -36,22 +57,25 @@ order-of-magnitude and **calibrate by measuring**.
 
 ## 2. Choosing the sampling capacitor `Cs`
 
-`Cs/Cx` ratio and predicted count `N ≈ k·Cs/Cx` (k≈0.7–1.2), vs our max-count
-ceiling (`st,max-count-value = 16383` in the overlay):
+Because `Cx` is now small (2 pF), `N ≈ k·Cs/Cx` gets **large**, so `Cs` must be
+small to keep the empty count under the max-count ceiling
+(`st,max-count-value = 16383`). Predicted `N ≈ k·Cs/Cx` (k ≈ 0.7–1.2), for the
+bare electrode (no Cpar — the worst case for max-count):
 
-| `Cs` | `Cs/Cx` empty (50 pF) | `Cs/Cx` full (250 pF) | N empty (≈) | N full (≈) | Swing |
-| --- | --- | --- | --- | --- | --- |
-| 22 nF  | 440 | 88  | ~310–530   | ~60–105   | ~250–420  |
-| **47 nF** | **940** | **188** | **~660–1130** | **~130–225** | **~530–900** |
-| 100 nF | 2000 | 400 | ~1400–2400 | ~280–480  | ~1100–1900 |
-| 220 nF | 4400 | 880 | ~3100–5300 | ~620–1060 | ~2500–4200 |
+| `Cs` | N empty (2 pF) | N trigger (18 pF) | N full (34 pF) | Note |
+| --- | --- | --- | --- | --- |
+| 4.7 nF | ~1.6k–2.8k | ~180–310 | ~100–170 | conservative / fast |
+| **10 nF** | **~3.5k–6.0k** | **~390–670** | **~210–350** | **recommended** |
+| 22 nF | ~7.7k–13.2k | ~860–1.5k | ~450–780 | more resolution; near the ceiling at 2 pF |
+| 47 nF | ~16k–28k ⚠ | — | — | **exceeds max-count** — do not use |
 
-**Recommended start: `Cs = 47 nF.`** `Cs/Cx` stays in the linear regime
-(188–940), empty count sits comfortably below 16383 (headroom if the electrode
-turns out drier than 50 pF), and the empty↔full swing (~500–900 counts) is huge
-relative to expected noise. Move to **100 nF** if you want more resolution
-(acquisition time is irrelevant for a slow level sensor); drop to **22 nF** if
-counts come out too high or you want faster acquisition.
+**Recommended start: `Cs = 10 nF.`** Even at a bare 2 pF with k = 1.2 the empty
+count (~6k) stays well under 16383, and once Cpar is included (effective
+empty ~7–12 pF) it drops to ~1k–2k — lots of headroom. The empty → full swing is
+thousands of counts, far above noise. Use **22 nF** for more resolution only if
+measured counts leave ceiling room; **4.7 nF** if counts run high or you want
+faster acquisition. (This is ~5× smaller than the old 47 nF, because `Cx`
+turned out ~20× smaller than assumed.)
 
 **Cs type matters:** use a **film** cap (polyester/PP, e.g. WIMA MKS2) or
 **C0G/NP0** — low tempco, low voltage-coefficient. **Do NOT use X7R/X5R
@@ -61,7 +85,7 @@ swamp the water signal. 50 V, ±5–10 %, radial through-hole is fine.
 ## 3. Through-hole parts for the bare-board prototype
 
 ### 3a. Sampling capacitor (one per active group)
-- **47 nF film** (primary). Also buy **22 nF** and **100 nF** to bracket.
+- **10 nF film/C0G** (primary). Also handy: **4.7 nF** and **22 nF** to bracket.
 
 ### 3b. Electrode emulators — validate *without* a bucket
 Stand in for `Cx` with precise, stable **C0G/NP0 through-hole ceramics** (±5 %,
@@ -69,19 +93,19 @@ Stand in for `Cx` with precise, stable **C0G/NP0 through-hole ceramics** (±5 %,
 
 | Emulates | Cap |
 | --- | --- |
-| Empty (~50 pF) | **47 pF** |
-| ¼–½ full | 100 pF, 150 pF |
-| Full (~250 pF) | **220 pF** (or 220 pF ∥ 33 pF ≈ 253 pF) |
-| Over-full margin | 270 pF |
+| Empty (~2 pF) | ~**2.2 pF** (or nothing — just the bare-pin parasitic) |
+| Trigger / half (~18 pF) | **18 pF** (or 15 pF ∥ 2.2 pF) |
+| Full (~34 pF) | **33 pF** ✅ *(you have these)* |
+| Over-full margin | 47 pF |
 
-A small kit — **47 / 68 / 100 / 150 / 220 / 270 pF C0G** — lets you plot N vs Cx
-and set thresholds before any copper goes on a bucket.
+A small kit — **2.2 / 10 / 18 / 33 / 47 pF C0G** — lets you plot N vs Cx and set
+thresholds before any copper goes on a bucket. The **33 pF** you already have is
+a perfect "full" stand-in (see §4a for the quick test).
 
 ### 3c. Series resistor (electrode)
-- **Rs = 2.2 kΩ … 10 kΩ**, 1/4 W through-hole, in series with the channel IO
-  (ESD/EMC; also sets the charge time constant τ = Rs·Cx; at 10 kΩ·250 pF ≈
-  2.5 µs — the charge-transfer pulse must be ≥ a few τ, see §6). Start at 10 kΩ;
-  reduce if large-Cx acquisition saturates.
+- **Rs = 1 kΩ … 10 kΩ**, 1/4 W through-hole, in series with the channel IO
+  (ESD/EMC; also sets τ = Rs·Cx; at 10 kΩ·34 pF ≈ 0.34 µs it's tiny, so timing
+  is not a constraint at this Cx). Start at ~1–2.2 kΩ.
 - Sampling IO needs **no** series resistor.
 
 ## 4. Wiring on the Nucleo (TSC Group 1)
@@ -90,39 +114,56 @@ Matches the overlay (`firm/boards/nucleo_wb55rg.overlay`): G1 sampling =
 `TSC_IO1` (PB12), channel = `TSC_IO2` (PB13).
 
 ```
-  PB12 (G1_IO1, sampling) ──┬── Cs 47nF ── GND
+  PB12 (G1_IO1, sampling) ──┬── Cs 10nF ── GND
                             (keep this lead short)
 
-  PB13 (G1_IO2, channel) ── Rs 10k ──┬── electrode  OR  test-cap Cx ── GND
+  PB13 (G1_IO2, channel) ── Rs 1–2.2k ──┬── electrode  OR  test-cap Cx ── GND
 ```
 
 - PB12–PB15 are on the ST **morpho** header (CN10) — confirm exact pins against
-  the Nucleo-WB55 user manual (UM) before wiring.
+  the Nucleo-WB55 user manual (UM) before wiring. `GND`/`3V3` are on the morpho
+  too.
 - Short leads, one solid ground reference, keep the pump wiring away from the
   electrode node.
 
-## 5. Firmware instrumentation (prerequisite)
+### 4a. Quick 33 pF test (do this first)
 
-The shipped `tsc-keys` driver only emits press/release — **it does not expose the
-raw count**, which is exactly what characterization needs. Add a raw-count
-readout before collecting data, e.g. a shell command:
+You have 33 pF caps — this needs no bucket:
+
+1. **Cs:** `PB12 ── 10 nF ── GND`.
+2. **Baseline:** leave `PB13` open (just the Rs + bare pin). On the shell run
+   `tsc` a few times. This is the **parasitic floor** (≈ empty); expect maybe
+   ~700–3000 counts depending on wiring/Cpar. Note it.
+3. **"Full":** add `PB13 ── 33 pF ── GND` (in parallel with the parasitic, so
+   effective Cx ≈ 33 pF + Cpar). Run `tsc` again — expect roughly **~200–350**.
+
+The count should **drop a lot** when you add the 33 pF (N ∝ 1/Cx). That drop is
+your empty↔full dynamic range. If "full" (33 pF) isn't comfortably below the
+baseline, raise `Cs` (→ 22 nF) for more resolution; if the baseline is near
+16383, lower `Cs` (→ 4.7 nF). Then sweep 2.2 / 18 / 33 pF to map the curve.
+
+## 5. Firmware instrumentation (done)
+
+The raw per-group count is already exposed (see `firm/src/tsc.c`): the firmware
+samples Group 1 and prints the count with the **`tsc`** shell command, and also
+publishes it live in the BLE Level characteristic (`rawTSC`) and the app's
+"raw TSC" readout.
 
 ```
-uart:~$ tsc read      # trigger one acquisition, print the Group-1 count
+uart:~$ tsc
 g1 count = 712
 ```
 
-Implementation options: read the TSC `IOGxCR[CNT]` count register for the group
-after an acquisition, or add a tiny raw acquisition path alongside the input
-driver. (Ask and I'll wire this up as `src/tsc_raw.c` + a shell command.)
+(With nothing wired it reads ~1 — the acquisition finishes in one cycle, see
+`LEVEL_COUNT_MIN_VALID` in `level.c`.)
 
 ## 6. Validation procedure
 
-1. **Bench sweep (emulated Cx).** With `Cs = 47 nF`, plug each C0G cap
-   (47→270 pF) in turn; record the average of ~100 `tsc read` samples. Plot
+1. **Bench sweep (emulated Cx).** With `Cs = 10 nF`, run §4a, then sweep the C0G
+   caps (2.2 → 33 pF) in turn; record the average of ~100 `tsc` samples. Plot
    **N vs Cx** and **1/N vs Cx** — the latter should be ~linear (N ∝ 1/Cx).
-   Confirm: 47 pF and 220 pF counts are well separated and both inside
-   `[noise , max-count]`.
+   Confirm bare (empty) and 33 pF (full) counts are well separated and both
+   inside `[noise , max-count]`.
 2. **Right-size Cs.** If empty-count is near 16383 → lower `Cs`; if the swing is
    small vs noise → raise `Cs`. Re-sweep.
 3. **Noise / SNR.** Log ~1000 samples at a fixed Cx; compute mean and σ. Require
@@ -135,32 +176,39 @@ driver. (Ask and I'll wire this up as `src/tsc_raw.c` + a shell command.)
    and `N_release` (count above), with a hysteresis band ~10–20 % of the swing
    to stop chatter. Prefer **baseline tracking** (slow-moving reference) over a
    fixed threshold so temperature/humidity drift doesn't cause false trips —
-   then fold these into the `tsc-keys` `noise-threshold`/`oversampling`/
-   `sampling-interval-ms` (or a custom level algorithm).
+   then set `LEVEL_TRIGGER_COUNT`/`LEVEL_RELEASE_COUNT` in `level.c` (or grow it
+   into a baseline-tracking algorithm).
 
 ## 7. If counts saturate or are unstable
 
 Tune the acquisition (overlay props), roughly in this order:
 
-- **`st,charge-transfer-pulse-high/low`** — increase so each pulse fully
-  charges the (large) `Cx` through `Rs` (needs ≥ a few τ).
+- **`st,max-count-value`** — raise/lower the ceiling to fit the empty count
+  (first lever here, since small `Cx` makes empty counts large).
+- **`st,charge-transfer-pulse-high/low`** — at 2–34 pF, `τ = Rs·Cx` is < 1 µs so
+  the default short pulses are fine; only lengthen if transfers look incomplete.
 - **`st,pulse-generator-prescaler`** — adjust the charge-transfer clock.
-- **`st,max-count-value`** — raise/lower the ceiling to fit the empty count.
 - **`st,spread-spectrum`** — enable for EMC if counts are noisy near switching
   loads (the pump).
 
 ## 8. Acceptance criteria
 
-Stable, repeatable separation between empty (~50 pF) and full (~250 pF) with
+Stable, repeatable separation between empty (~2 pF) and full (~34 pF) with
 SNR ≳ 10 and no false trips across the expected temperature/humidity range once
 baseline tracking is on.
+
+> **Firmware follow-up:** `level.c` still has placeholder thresholds
+> (`LEVEL_TRIGGER_COUNT`/`LEVEL_RELEASE_COUNT` = 300/400) from the old 50–250 pF
+> guess. Recalibrate them from this sweep: trigger a bit below the "water at
+> band" count, release above it (hysteresis). With Cs = 10 nF, expect those to
+> land in the few-hundreds (full ≈ 200–350, empty ≈ thousands).
 
 ## BOM (prototyping)
 
 | Qty | Part | Notes |
 | --- | --- | --- |
-| 1–3 | 47 nF film cap (+ 22 nF, 100 nF) | sampling `Cs`, 50 V, film/C0G — **not X7R** |
-| 1 ea | 47/68/100/150/220/270 pF C0G ceramic | electrode emulators, 50 V ±5 % |
-| 2 | 10 kΩ, 2.2 kΩ resistor 1/4 W | series `Rs` (start 10 k) |
-| 1 | copper tape / small PCB | the real electrode (later) |
+| 1–3 | 10 nF film/C0G (+ 4.7 nF, 22 nF) | sampling `Cs`, 50 V — **not X7R** |
+| 1 ea | 2.2 / 10 / 18 / 33 / 47 pF C0G | electrode emulators, 50 V ±5 % (33 pF ≈ full) |
+| 2 | 1 kΩ, 2.2 kΩ resistor 1/4 W | series `Rs` (start ~1–2.2 k) |
+| 1 | copper foil/tape | the real electrode (later) |
 | — | LCR meter or DMM w/ cap range | ground-truth real `Cx` |
