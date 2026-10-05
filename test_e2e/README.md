@@ -65,23 +65,19 @@ With `BUCKET_INSTALL=1`, setup calls `Board.install()` (OpenOCD flash) and
 | `PYTHON` | `~/venv/bin/python` |
 | `ADB` | `~/Library/Android/sdk/platform-tools/adb` |
 
-## Pairing (bonds persist — pair once)
+## Pairing
 
 `bond`/SW1 opens the pairing window but does **not** clear existing bonds, so a
 returning phone reconnects seamlessly (encryption via stored keys, no prompt).
-The pipeline relies on this: the app-side "forget" only drops the app's record,
-so `test_02` re-connects with no dialog.
+The app-side "forget" only drops the app's record, so `test_02` normally
+re-connects with no dialog.
 
-- **First-ever pairing** (both sides unbonded) needs the Android "Pair" prompt
-  confirmed once. Run the one-time bootstrap, which taps it via adb:
-  ```sh
-  python bootstrap_pair.py
-  ```
-  After that the pipeline is fully automated.
-- The pipeline **auto-accepts** a pairing prompt if one ever appears
-  (`AndroidClient.confirm_pairing`), but normally it's seamless.
-- To switch to a different phone / recover a mismatched bond, clear the board's
-  bonds: shell `bond clear` (or `Board` + that command). Rarely needed.
+When a fresh pairing *is* required (e.g. after `bond clear` or a new phone),
+Android shows a "Pair" prompt — `test_02` **auto-accepts it via adb**
+(`AndroidClient.confirm_pairing`). Auto-confirming the pairing is fine for a
+dedicated e2e test device.
+
+To switch to a different phone / recover a mismatched bond: shell `bond clear`.
 
 ## Notes
 
