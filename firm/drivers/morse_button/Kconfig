@@ -3,6 +3,7 @@ config MORSE_BUTTON
 	default y
 	depends on DT_HAS_DKV_MORSE_BUTTON_ENABLED
 	select INPUT
+	select DKV_WORKQUEUE
 	help
 	  Decode press/release timing of one input key into dot/dash
 	  sequences and dispatch the codes listed in the devicetree.

@@ -1,5 +1,30 @@
 menu "Bucket out-of-tree drivers"
 
+config DKV_WORKQUEUE
+	bool
+	help
+	  Shared workqueue for the drivers in this module, so their deferred
+	  work (LED pattern updates, button-code handlers that may write flash)
+	  never delays the system workqueue, which the Bluetooth host uses.
+
+if DKV_WORKQUEUE
+
+config DKV_WORKQUEUE_STACK_SIZE
+	int "Driver workqueue stack size"
+	default 2048
+	help
+	  Morse-button code handlers run here; size it for what they do
+	  (e.g. deleting bonds from settings/flash).
+
+config DKV_WORKQUEUE_PRIORITY
+	int "Driver workqueue thread priority"
+	default 11
+	help
+	  Preemptible, below the Bluetooth host threads (BT_RX_PRIO,
+	  BT_LONG_WQ_PRIO) so UI work yields to the radio stack.
+
+endif
+
 rsource "morse_button/Kconfig"
 rsource "signal_led/Kconfig"
 

@@ -13,7 +13,8 @@
 extern "C" {
 #endif
 
-/** Called from the system workqueue when entry @p entry's code is entered. */
+/** Called from the module's driver workqueue (dkv_wq, below the BT threads)
+ *  when entry @p entry's code is entered; may block briefly (e.g. flash). */
 typedef void (*morse_button_handler_t)(const struct device *dev, size_t entry, void *user_data);
 
 /** Morse-button device owning the code node @p node_id. */

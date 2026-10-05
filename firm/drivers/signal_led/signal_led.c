@@ -10,6 +10,7 @@
  */
 #define DT_DRV_COMPAT dkv_signal_led
 
+#include <drivers/dkv_wq.h>
 #include <drivers/signal_led.h>
 
 #include <zephyr/drivers/gpio.h>
@@ -149,7 +150,7 @@ static void pattern_work_handler(struct k_work *work)
 	case SIGNAL_LED_BLINK:
 		data->blink_on = !data->blink_on;
 		rc = set_level(dev, data->blink_on ? LEVEL_MAX : 0);
-		k_work_reschedule(dwork, K_MSEC(data->period_ms / 2));
+		k_work_reschedule_for_queue(&dkv_wq, dwork, K_MSEC(data->period_ms / 2));
 		break;
 	case SIGNAL_LED_GLOW: {
 		/* sin^2 has period pi: dark -> full -> dark once per period_ms */
@@ -157,7 +158,7 @@ static void pattern_work_handler(struct k_work *work)
 		float s = crude_sinf(M_PI * t / data->period_ms);
 
 		rc = set_level(dev, (uint8_t)(s * s * LEVEL_MAX));
-		k_work_reschedule(dwork, K_MSEC(GLOW_UPDATE_MS));
+		k_work_reschedule_for_queue(&dkv_wq, dwork, K_MSEC(GLOW_UPDATE_MS));
 		break;
 	}
 	default:
@@ -201,12 +202,12 @@ int signal_led_set(const struct device *dev, enum signal_led_mode mode, uint32_t
 	case SIGNAL_LED_BLINK:
 		data->blink_on = true;
 		rc = set_level(dev, LEVEL_MAX);
-		k_work_reschedule(&data->pattern_work, K_MSEC(period_ms / 2));
+		k_work_reschedule_for_queue(&dkv_wq, &data->pattern_work, K_MSEC(period_ms / 2));
 		break;
 	case SIGNAL_LED_GLOW:
 		data->t0 = k_uptime_get();
 		rc = set_level(dev, 0);
-		k_work_reschedule(&data->pattern_work, K_MSEC(GLOW_UPDATE_MS));
+		k_work_reschedule_for_queue(&dkv_wq, &data->pattern_work, K_MSEC(GLOW_UPDATE_MS));
 		break;
 	case SIGNAL_LED_OFF:
 	default:
@@ -217,7 +218,7 @@ int signal_led_set(const struct device *dev, enum signal_led_mode mode, uint32_t
 	if (K_TIMEOUT_EQ(duration, K_FOREVER) || mode == SIGNAL_LED_OFF) {
 		k_work_cancel_delayable(&data->stop_work);
 	} else {
-		k_work_reschedule(&data->stop_work, duration);
+		k_work_reschedule_for_queue(&dkv_wq, &data->stop_work, duration);
 	}
 	k_mutex_unlock(&data->lock);
 

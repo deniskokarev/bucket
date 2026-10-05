@@ -10,6 +10,7 @@
  */
 #define DT_DRV_COMPAT dkv_morse_button
 
+#include <drivers/dkv_wq.h>
 #include <drivers/morse_button.h>
 
 #include <string.h>
@@ -48,7 +49,7 @@ struct morse_button_data {
 	struct k_work dispatch_work;
 	struct k_spinlock lock;
 	int64_t pressed_at;
-	size_t pending; /* entry matched on release, dispatched from the workqueue */
+	size_t pending; /* entry matched on release, dispatched from dkv_wq */
 	bool pressed;
 	bool dead;
 	size_t len;
@@ -175,9 +176,9 @@ static void on_release(const struct device *dev, int64_t held_ms)
 
 	if (entry != NO_MATCH) {
 		k_work_cancel_delayable(&data->reset_work);
-		k_work_submit(&data->dispatch_work);
+		k_work_submit_to_queue(&dkv_wq, &data->dispatch_work);
 	} else {
-		k_work_reschedule(&data->reset_work, K_MSEC(cfg->reset_delay_ms));
+		k_work_reschedule_for_queue(&dkv_wq, &data->reset_work, K_MSEC(cfg->reset_delay_ms));
 	}
 }
 

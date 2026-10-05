@@ -4,6 +4,7 @@ config SIGNAL_LED
 	depends on DT_HAS_DKV_SIGNAL_LED_ENABLED
 	select GPIO
 	select PWM
+	select DKV_WORKQUEUE
 	help
 	  Coded feedback LED patterns on a PWM LED, or on a plain GPIO LED
 	  using software PWM.
