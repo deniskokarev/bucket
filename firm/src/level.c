@@ -11,12 +11,14 @@ LOG_MODULE_REGISTER(level, LOG_LEVEL_INF);
  * is "present" when the count falls below LEVEL_TRIGGER_COUNT, and clears when
  * it rises back above LEVEL_RELEASE_COUNT (hysteresis to stop chatter).
  *
- * TODO: these are placeholders — calibrate from the bench sweep described in
- * hard/tsc-validation.md. With Cs=47nF the empty count is expected ~650 and a
- * full bucket ~130, so trigger/release sit between those.
+ * Calibrated for Cs = 10 nF and ~21 pF of pin/lead parasitic (bench, see
+ * hard/tsc-validation.md). Electrode dry (2 pF) ~330, half band (18 pF) ~195,
+ * full (34 pF) ~138. Trigger ~= 14 pF of water signal, release ~= 8 pF. If the
+ * parasitic grows by more than ~8 pF, dry drops under the release level:
+ * re-measure and re-set these (or move to baseline tracking).
  */
-#define LEVEL_TRIGGER_COUNT 300
-#define LEVEL_RELEASE_COUNT 400
+#define LEVEL_TRIGGER_COUNT 220
+#define LEVEL_RELEASE_COUNT 260
 
 /* Below this, no sampling cap / electrode is connected (the acquisition
  * completes in ~1 cycle) — not a real reading, so don't report "full". */

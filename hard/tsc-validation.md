@@ -67,9 +67,29 @@ reading-to-reading jitter.
 - Readings jump around: shorten the leads, take your hand away (a finger adds
   pF), and keep the pump wiring away.
 
----
+### Bench result (2026-10-11, Cs = 10 nF ceramic "103", Rs = 1 kΩ)
 
-How to characterize
+| D8 load | Count | Jitter |
+| --- | --- | --- |
+| open | 355 | steady |
+| 2 pF (nominal) | 305 | 304–305 |
+| 33 pF | 136 | steady |
+
+A straight-line fit gives `1/N ≈ 1.31e-4 · (Cx + Cpar)` with **Cpar ≈ 21 pF**
+(leads + header + pin) and k ≈ 0.76. The parasitic swamps the 2 pF part,
+which is why the counts are ~10× below the §2 table. This is treated as the
+worst case, since a real band and its leads add more.
+
+Firmware thresholds set from this fit (`firm/src/level.c`): **trigger < 220**
+(≈ 14 pF of water signal) and **release > 260** (≈ 8 pF). Expected: dry band
+~330, half ~195, full ~138. If Cpar grows by more than ~8 pF, the dry reading
+falls below 260: re-measure and re-set.
+
+**Using a 100 nF "104" Cs** would give ~10× the counts (dry ~3.4k, full
+~1.4k), still under the 16383 ceiling as long as Cx + Cpar ≥ ~5 pF. That's
+true with this wiring. If you swap it in, scale both thresholds ×10.
+
+---
 
 How to characterize the STM32 TSC water-level sensing on a **bare Nucleo-WB55RG**
 (no bucket yet), pick the sampling capacitor, and set firmware thresholds.
@@ -269,11 +289,9 @@ Stable, repeatable separation between empty (~2 pF) and full (~34 pF) with
 SNR ≳ 10 and no false trips across the expected temperature/humidity range once
 baseline tracking is on.
 
-> **Firmware follow-up:** `level.c` still has placeholder thresholds
-> (`LEVEL_TRIGGER_COUNT`/`LEVEL_RELEASE_COUNT` = 300/400) from the old 50–250 pF
-> guess. Recalibrate them from this sweep: trigger a bit below the "water at
-> band" count, release above it (hysteresis). With Cs = 10 nF, expect those to
-> land in the few-hundreds (full ≈ 200–350, empty ≈ thousands).
+> **Firmware thresholds:** `level.c` uses trigger 220 / release 260, from the
+> Quick-start bench fit (Cs = 10 nF, Cpar ≈ 21 pF). Re-set them after the
+> real-band test.
 
 ## BOM (prototyping)
 
