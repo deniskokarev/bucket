@@ -179,7 +179,7 @@ class Board:
     def tsc_count(self) -> int:
         self.clear()
         self.send("tsc")
-        return int(self.wait_for(r"g1 count = (\d+)", timeout=5).group(1))
+        return int(self.wait_for(r"g\d count = (\d+)", timeout=5).group(1))
 
     def bond_count(self) -> int:
         self.clear()

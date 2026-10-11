@@ -1,5 +1,76 @@
 # TSC capacitive sensing — validation & prototyping
 
+## Quick start: bench test on the ARDUINO headers (no soldering, no bucket)
+
+**Yes, TSC pins reach the ARDUINO headers.** TSC Group 3 lands on three
+ARDUINO pins (DS11929 pin table; UM2819 Table 9; Zephyr `stm32wb55rgvx-pinctrl`):
+
+| TSC IO | MCU pin | ARDUINO | Connector-pin | Use |
+| --- | --- | --- | --- | --- |
+| G3_IO1 | PA15 | D5 | CN9-6 | not used (board DTS gives it to `pwm2`) |
+| **G3_IO2** | **PC10** | **D4** | **CN9-5** | **sampling cap `Cs`** |
+| G3_IO3 | PC11 | — | morpho only | — |
+| **G3_IO4** | **PC12** | **D8** | **CN5-1** | **electrode / test cap** |
+| — | GND | GND | **CN5-7** (or CN6-6/7) | ground |
+
+No other TSC group has two IOs on the ARDUINO headers. G1 (PB12–15) and G2
+(PB4–7) are morpho-only, and G4 (PC6 = D2) and G7 (PB9 = D14) have just one
+ARDUINO pin each. PC10 and PC12 drive nothing else on the board (no LED,
+button, or solder bridge).
+
+> Requires the overlay set to `group = <3>`, `sampling-io = <TSC_IO2>`,
+> `channel-ios = <TSC_IO4>`, pinctrl `tsc_g3_io2_pc10 tsc_g3_io4_pc12`. The
+> shell prints `g3 count = …`. If the firmware still uses Group 1, use the
+> morpho wiring in §4 instead.
+
+UM2819 places the ARDUINO sockets on the board's **bottom side**.
+
+### Parts (make these as jumper leads)
+
+| Lead | Between | Part in the lead |
+| --- | --- | --- |
+| **A — Cs** | D4 (CN9-5) ↔ GND (CN5-7) | **10 nF film or C0G** (not X7R/X5R) |
+| **B — Rs** | D8 (CN5-1) ↔ free end "E" | **1 kΩ** (2.2 kΩ is also fine) |
+| **C — Cx** | E ↔ GND (CN5-7 or CN6-6/7) | swap in **2.2 / 18 / 33 / 47 pF C0G** |
+
+```
+ D4 (PC10) ──[ 10 nF ]── GND            lead A: keep it short
+ D8 (PC12) ──[ 1 kΩ ]── E ──[ Cx ]── GND  leads B + C
+```
+
+### Procedure
+
+1. Flash, open the shell (`uart:~$`). With **nothing** plugged in, `tsc` shows
+   about `1`. That's expected: no Cs means no count.
+2. Plug in **lead A** only. `tsc` should now read a large number (thousands).
+   If it still shows ~1, lead A is on the wrong pin or the cap is open.
+3. Add **lead B** with E left floating. Run `tsc` 5×. That reading is the
+   **"empty"** baseline.
+4. Add **lead C** with each cap in turn and run `tsc` 5× per cap:
+   2.2 pF → 18 pF → 33 pF → 47 pF.
+5. Fill in the table. The count should **drop** as Cx grows (N ∝ 1/Cx).
+
+| Cx | `tsc` readings (5×) | mean |
+| --- | --- | --- |
+| open (E floating) | | |
+| 2.2 pF | | |
+| 18 pF | | |
+| 33 pF | | |
+| 47 pF | | |
+
+**Pass:** open > 2.2 > 18 > 33 > 47 pF, with each step well above the
+reading-to-reading jitter.
+
+**Troubleshooting:**
+- Reads ~16383 (ceiling): use a **4.7 nF** Cs.
+- 33 pF is hardly below open: use a **22 nF** Cs.
+- Readings jump around: shorten the leads, take your hand away (a finger adds
+  pF), and keep the pump wiring away.
+
+---
+
+How to characterize
+
 How to characterize the STM32 TSC water-level sensing on a **bare Nucleo-WB55RG**
 (no bucket yet), pick the sampling capacitor, and set firmware thresholds.
 
@@ -108,9 +179,10 @@ a perfect "full" stand-in (see §4a for the quick test).
   is not a constraint at this Cx). Start at ~1–2.2 kΩ.
 - Sampling IO needs **no** series resistor.
 
-## 4. Wiring on the Nucleo (TSC Group 1)
+## 4. Alternative wiring on the morpho header (TSC Group 1)
 
-Matches the overlay (`firm/boards/nucleo_wb55rg.overlay`): G1 sampling =
+The firmware now uses Group 3 on the ARDUINO headers (see Quick start). Group 1
+below works only if the overlay is switched back to G1: sampling =
 `TSC_IO1` (PB12), channel = `TSC_IO2` (PB13).
 
 ```

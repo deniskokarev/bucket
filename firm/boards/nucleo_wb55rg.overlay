@@ -12,11 +12,13 @@
  *      as the signal LED. PB5 has no timer PWM output on the WB55, so the
  *      signal-led driver uses software PWM on the GPIO.
  *
- * TSC pin choice (Group 1, all free on this board — LEDs=PB0/1/5,
- * USART1=PB6/7, I2C1=PB8/9, SPI1/TIM on PAx):
- *   - PB12 = G1_IO1 -> sampling capacitor (external Cs to GND, ~10-50nF)
- *   - PB13 = G1_IO2 -> sensing electrode (the bucket-wall plate)
- * Adjust to your wiring; keep sampling-io and channel-ios in the same group.
+ * TSC pin choice: Group 3, on the ARDUINO headers (UM2819 Table 9), with no
+ * other board function on either pin:
+ *   - PC10 = G3_IO2 = D4 (CN9-5) -> sampling capacitor (external Cs to GND)
+ *   - PC12 = G3_IO4 = D8 (CN5-1) -> sensing electrode (via series Rs)
+ * G3_IO1 (PA15/D5) is avoided: the board DTS binds it to pwm2. Group 1
+ * (PB12-15) is morpho-only and PB12 is the board's LPUART1 RTS.
+ * Keep sampling-io and channel-ios in the same group.
  */
 
 #include <zephyr/dt-bindings/input/input-event-codes.h>
@@ -71,7 +73,7 @@
 		interrupts = <39 0>;
 		interrupt-names = "global";
 
-		pinctrl-0 = <&tsc_g1_io1_pb12 &tsc_g1_io2_pb13>;
+		pinctrl-0 = <&tsc_g3_io2_pc10 &tsc_g3_io4_pc12>;
 		pinctrl-names = "default";
 
 		st,pulse-generator-prescaler = <2>;
@@ -83,12 +85,12 @@
 
 		status = "okay";
 
-		tsc_group1: group1 {
-			/* Hardware TSC Group 1. The driver indexes registers as
-			 * (group - 1), so Group 1 is `group = <1>` (NOT 0). */
-			group = <1>;
-			channel-ios = <TSC_IO2>;  /* PB13 electrode */
-			sampling-io = <TSC_IO1>;  /* PB12 + external Cs */
+		tsc_group3: group3 {
+			/* Hardware TSC Group 3. The driver indexes registers as
+			 * (group - 1), so Group 3 is `group = <3>`. */
+			group = <3>;
+			channel-ios = <TSC_IO4>;  /* PC12 / D8 electrode */
+			sampling-io = <TSC_IO2>;  /* PC10 / D4 + external Cs */
 			/* No `tsc-keys` child: we read the raw acquisition count
 			 * ourselves (see src/tsc.c) for level sensing + validation. */
 		};

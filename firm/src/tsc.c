@@ -59,7 +59,7 @@ int tsc_init(void)
 	}
 
 	k_timer_start(&sample_timer, K_NO_WAIT, K_MSEC(TSC_SAMPLE_PERIOD_MS));
-	LOG_INF("TSC sampling every %d ms (group 1)", TSC_SAMPLE_PERIOD_MS);
+	LOG_INF("TSC sampling every %d ms (group 3)", TSC_SAMPLE_PERIOD_MS);
 	return 0;
 }
 
@@ -68,7 +68,7 @@ static int cmd_tsc(const struct shell *sh, size_t argc, char **argv)
 {
 	ARG_UNUSED(argc);
 	ARG_UNUSED(argv);
-	shell_print(sh, "g1 count = %u", tsc_last_count());
+	shell_print(sh, "g3 count = %u", tsc_last_count());
 	return 0;
 }
 
