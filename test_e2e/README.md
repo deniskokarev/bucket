@@ -31,6 +31,10 @@ bonding/control pipeline works.
 03 gatt read       app shows live Level data ("raw TSC")
 04 gatt write      app pump On/Auto reaches the board (pump mode -> N)
 04b no accidental  ".", "..", "-", ".-", "-..-" keep the bond and the link
+04c thresholds     shell `level set 300 200` shows in the app's Settings form
+    shell->app     (notify); `level set 200 250` (off <= on) is rejected
+04d thresholds     form 280/230 + Save -> board `level get`, persisted in
+    app->shell     settings; form 200/250 shows a validation error, no write
 05 background      backgrounding stops notifications but keeps the link (held
                    30 s); then the board drops it (`bt disconnect`)
 06 reconnect       foregrounding auto-connects (bonded)

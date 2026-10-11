@@ -10,6 +10,7 @@ import {
 import { useBucket } from './hooks/useBucket';
 import { StatusCard } from './components/StatusCard';
 import { PumpControl } from './components/PumpControl';
+import { ThresholdsForm } from './components/ThresholdsForm';
 import { styles } from './styles';
 
 const STATUS_COLOR: Record<string, string> = {
@@ -59,6 +60,10 @@ function App() {
                   pumpOn={bucket.level?.pumpOn ?? false}
                   disabled={false}
                   onChange={bucket.setPumpMode}
+                />
+                <ThresholdsForm
+                  thresholds={bucket.thresholds}
+                  onSave={bucket.setThresholds}
                 />
               </>
             ) : (

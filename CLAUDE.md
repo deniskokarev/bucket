@@ -68,7 +68,10 @@ preferred path; keep flashing on one tool to avoid confusion.
 
 - `main.c` — wiring: init pump + level sensor, run the control loop.
 - `level.{c,h}` — capacitive level sensing. Consumes TSC acquisitions / input
-  events, applies hysteresis, exposes "water above trigger?".
+  events, applies hysteresis, exposes "water above trigger?". Owns the pump
+  thresholds (raw TSC counts, OFF above / ON below, off > on), persisted in
+  settings as `level/thr`. Set them with the `level get|set <off> <on>` shell
+  command or the encrypted Thresholds GATT characteristic (app Settings form).
 - `pump.{c,h}` — pump GPIO actuation with a minimum run-time / safety guard.
 - `bond.{c,h}` — bonding window. SW1 `..-` / `bond` **clears all bonds first**,
   then accepts one new pairing for 60 s; reports bond events.

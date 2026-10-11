@@ -80,10 +80,12 @@ A straight-line fit gives `1/N ≈ 1.31e-4 · (Cx + Cpar)` with **Cpar ≈ 21 pF
 which is why the counts are ~10× below the §2 table. This is treated as the
 worst case, since a real band and its leads add more.
 
-Firmware thresholds set from this fit (`firm/src/level.c`): **trigger < 220**
-(≈ 14 pF of water signal) and **release > 260** (≈ 8 pF). Expected: dry band
-~330, half ~195, full ~138. If Cpar grows by more than ~8 pF, the dry reading
-falls below 260: re-measure and re-set.
+Default firmware thresholds from this fit (`firm/src/level.c`): **pump ON
+below 220** (≈ 14 pF of water signal) and **pump OFF above 260** (≈ 8 pF).
+Expected: dry band ~330, half ~195, full ~138. If Cpar grows by more than
+~8 pF, the dry reading falls below 260: re-measure, then re-set them at runtime
+with `level set <off> <on>` (e.g. `level set 260 220`) or the app's Settings
+form. Both persist across reboot.
 
 **Using a 100 nF "104" Cs** would give ~10× the counts (dry ~3.4k, full
 ~1.4k), still under the 16383 ceiling as long as Cx + Cpar ≥ ~5 pF. That's
@@ -268,8 +270,8 @@ g1 count = 712
    and `N_release` (count above), with a hysteresis band ~10–20 % of the swing
    to stop chatter. Prefer **baseline tracking** (slow-moving reference) over a
    fixed threshold so temperature/humidity drift doesn't cause false trips —
-   then set `LEVEL_TRIGGER_COUNT`/`LEVEL_RELEASE_COUNT` in `level.c` (or grow it
-   into a baseline-tracking algorithm).
+   then set them with `level set <off> <on>` or the app's Settings form (or
+   grow `level.c` into a baseline-tracking algorithm).
 
 ## 7. If counts saturate or are unstable
 
@@ -289,9 +291,9 @@ Stable, repeatable separation between empty (~2 pF) and full (~34 pF) with
 SNR ≳ 10 and no false trips across the expected temperature/humidity range once
 baseline tracking is on.
 
-> **Firmware thresholds:** `level.c` uses trigger 220 / release 260, from the
-> Quick-start bench fit (Cs = 10 nF, Cpar ≈ 21 pF). Re-set them after the
-> real-band test.
+> **Firmware thresholds:** defaults are OFF 260 / ON 220, from the Quick-start
+> bench fit (Cs = 10 nF, Cpar ≈ 21 pF). After the real-band test, re-set them
+> with `level set <off> <on>` or the app's Settings form.
 
 ## BOM (prototyping)
 

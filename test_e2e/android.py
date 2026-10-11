@@ -261,6 +261,35 @@ class AndroidClient:
                       f"tap={tap_kw} want_text={want_text} want_contains={want_contains} "
                       f"want_regex={want_regex} gone_text={gone_text}")
 
+    def field_text(self, label: str) -> str:
+        """Current value of the text field whose content-desc is `label`."""
+        for n in self._nodes():
+            if n.get("content-desc") == label:
+                return n.get("text") or ""
+        raise UiError("text field not found", self.safe_texts(), label)
+
+    def set_field(self, label: str, value: str) -> None:
+        """Replace the contents of the text field `label` with `value`."""
+        for n in self._nodes():
+            if n.get("content-desc") == label and self._tappable(n):
+                self.tap_node(n)
+                break
+        else:
+            raise UiError("text field not found", self.safe_texts(), label)
+        time.sleep(0.5)
+        self.shell("input", "keyevent", "KEYCODE_MOVE_END")
+        self.shell("input", "keyevent", *(["KEYCODE_DEL"] * 8))
+        self.shell("input", "text", value)
+        time.sleep(0.5)
+        # The keyboard shrinks the window and hides fields below this one.
+        self.hide_keyboard()
+
+    def hide_keyboard(self) -> None:
+        """Dismiss the soft keyboard; BACK only when it's up (else it'd leave the app)."""
+        if "mInputShown=true" in self.shell("dumpsys", "input_method"):
+            self.shell("input", "keyevent", "KEYCODE_BACK")
+            time.sleep(0.5)
+
     def confirm_pairing(self, timeout: float = 30) -> bool:
         """Auto-accept the Android 'Bluetooth pairing request' if it appears.
 

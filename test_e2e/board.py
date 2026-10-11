@@ -181,6 +181,20 @@ class Board:
         self.send("tsc")
         return int(self.wait_for(r"g\d count = (\d+)", timeout=5).group(1))
 
+    def thresholds(self) -> tuple[int, int]:
+        """(off, on) pump thresholds from `level get`."""
+        self.clear()
+        self.send("level get")
+        m = self.wait_for(r"level thresholds: off (\d+) on (\d+)", timeout=5)
+        return int(m.group(1)), int(m.group(2))
+
+    def set_thresholds(self, off: int, on: int) -> bool:
+        """`level set <off> <on>`; True if the board accepted it."""
+        self.clear()
+        self.send(f"level set {off} {on}")
+        m = self.wait_for(r"level thresholds: off \d+ on \d+|error: off must be greater", timeout=5)
+        return m.group(0).startswith("level thresholds")
+
     def bond_count(self) -> int:
         self.clear()
         self.send("bt bonds")

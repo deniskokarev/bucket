@@ -10,6 +10,10 @@ Ordered sequence (method name prefixes enforce order; run with -f/failfast):
     04 gatt write     -> app pump control reaches the board
     04b no accidental -> other SW1 presses (".", "..", "-", ".-", "-..-")
         unbond           keep the bond and the link
+    04c thresholds    -> shell `level set <off> <on>` shows in the app (notify);
+        shell->app       off <= on is rejected
+    04d thresholds    -> app Settings form write reaches the board + persists;
+        app->shell       off <= on is blocked by the form
     05 background     -> backgrounding silences notifications but keeps the
                          link; then the board drops it (`bt disconnect`)
     06 reconnect      -> foregrounding auto-connects (bonded)
@@ -50,6 +54,10 @@ CANCEL = r"(?i)^cancel$"             # confirmation dialog's cancel button
 PUMP_ON = "On"
 PUMP_AUTO = "Auto"
 DEVICE_NAME = "BucketEvac"          # advertised name / OS paired-devices entry
+THR_OFF = "threshold-off"           # Settings form fields (accessibilityLabel)
+THR_ON = "threshold-on"
+SETTINGS_TOGGLE = "settings-toggle"
+SAVE_THRESHOLDS = "Save thresholds"
 
 # How long a backgrounded app must hold the link without dropping it.
 BACKGROUND_HOLD_S = 30
@@ -252,6 +260,72 @@ class PipelineTest(unittest.TestCase):
                     self.fail_verbose(f"SW1 {code!r} must not cause {bad!r}")
         self.assertEqual(self.board.bond_count(), 1, "bond lost to a non-rebond code")
         self._assert_secure_write()
+
+    def _settings(self, open_: bool):
+        """Expand/collapse the (collapsed by default) Settings card."""
+        if self.app.has(text=THR_OFF) == open_:
+            return
+        if open_:
+            self.app.tap_until(text=SETTINGS_TOGGLE, want_text=THR_OFF)
+        else:
+            self.app.hide_keyboard()
+            self.app.tap_until(text=SETTINGS_TOGGLE, gone_text=THR_OFF)
+
+    def _wait_app_thresholds(self, off: int, on: int, timeout: float = 15):
+        deadline = time.time() + timeout
+        seen = None
+        while time.time() < deadline:
+            try:
+                seen = (self.app.field_text(THR_OFF), self.app.field_text(THR_ON))
+            except UiError:
+                pass
+            if seen == (str(off), str(on)):
+                return
+            time.sleep(1)
+        self.fail_verbose(f"app thresholds {seen} != expected ({off}, {on})")
+
+    def test_04c_thresholds_shell_to_app(self):
+        # Shell `level set <off> <on>` is notified to the connected app.
+        self._settings(True)
+        self.assertTrue(self.board.set_thresholds(300, 200), "board rejected 300/200")
+        self._wait_app_thresholds(300, 200)
+        # Invalid (off <= on) is rejected by the shell; nothing changes.
+        self.assertFalse(self.board.set_thresholds(200, 250), "board accepted off < on")
+        self.assertEqual(self.board.thresholds(), (300, 200))
+        self._wait_app_thresholds(300, 200, timeout=3)
+
+    def test_04d_thresholds_app_to_shell(self):
+        # The app's Settings form writes the encrypted characteristic.
+        self._settings(True)
+        self.board.clear()
+        self.app.set_field(THR_OFF, "280")
+        self.app.set_field(THR_ON, "230")
+        self.app.hide_keyboard()
+        self.app.tap_text(text=SAVE_THRESHOLDS)
+        try:
+            self.board.wait_for(r"level thresholds -> off 280 on 230", timeout=10)
+        except AssertionError as e:
+            self.fail_verbose(f"app thresholds write did not reach the board: {e}")
+        self.assertEqual(self.board.thresholds(), (280, 230))
+        self.board.clear()
+        self.board.send("settings read level/thr")
+        self.board.wait_for(r"18 01 e6 00", timeout=5)  # persisted (u16 LE)
+
+        # Minimal UI validation: OFF must exceed ON; Save does nothing.
+        self.app.set_field(THR_OFF, "200")
+        self.app.set_field(THR_ON, "250")
+        self.app.hide_keyboard()
+        try:
+            self.app.wait_for(contains="OFF count must be greater than ON count", timeout=5)
+        except UiError as e:
+            self.fail_verbose(f"no validation message for off < on: {e}")
+        self.board.clear()
+        self.app.tap_text(text=SAVE_THRESHOLDS)
+        time.sleep(3)
+        if "level thresholds ->" in self.board.snapshot():
+            self.fail_verbose("invalid thresholds were written to the board")
+        self.assertEqual(self.board.thresholds(), (280, 230))
+        self._settings(False)  # later steps expect the main screen layout
 
     def test_05_background(self):
         # Backgrounding silences notifications but keeps the link (the Android

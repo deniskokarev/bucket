@@ -146,4 +146,32 @@ export const styles = {
     marginTop: 24,
     lineHeight: 20,
   },
+
+  input: {
+    backgroundColor: '#0f172a',
+    color: 'white',
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    fontSize: 17,
+    minWidth: 110,
+    textAlign: 'right' as const,
+  },
+
+  cardTitleCollapsed: {
+    marginBottom: 0,
+  },
+
+  fieldRow: {
+    marginTop: 4,
+    marginBottom: 12,
+  },
+
+  saveButton: {
+    marginTop: 16,
+  },
+
+  disabled: {
+    opacity: 0.5,
+  },
 };

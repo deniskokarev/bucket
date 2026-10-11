@@ -9,11 +9,18 @@
 #define BUCKET_LEVEL_H
 
 #include <stdbool.h>
+#include <stdint.h>
 
 /* Set up the input-event subscription. Returns 0 on success. */
 int level_init(void);
 
 /* True once water has been detected at/above the electrode (trigger level). */
 bool level_water_present(void);
+
+/* Pump hysteresis in raw TSC counts: OFF above `off`, ON below `on`. */
+void level_get_thresholds(uint16_t *off, uint16_t *on);
+
+/* Validate (off > on), apply, persist and notify. -EINVAL if invalid. */
+int level_set_thresholds(uint16_t off, uint16_t on);
 
 #endif /* BUCKET_LEVEL_H */

@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useState } from 'react';
 import { AppState } from 'react-native';
 import { bleService, BucketState } from '../services/BleService';
-import { PumpMode } from '../utils/ble';
+import { PumpMode, Thresholds } from '../utils/ble';
 
 export interface UseBucketReturn extends BucketState {
   toggleScan: () => void;
   forget: () => Promise<void>;
   setPumpMode: (mode: PumpMode) => Promise<void>;
+  setThresholds: (t: Thresholds) => Promise<void>;
 }
 
 export const useBucket = (): UseBucketReturn => {
@@ -39,6 +40,10 @@ export const useBucket = (): UseBucketReturn => {
     (mode: PumpMode) => bleService.setPumpMode(mode),
     [],
   );
+  const setThresholds = useCallback(
+    (t: Thresholds) => bleService.setThresholds(t),
+    [],
+  );
 
-  return { ...state, toggleScan, forget, setPumpMode };
+  return { ...state, toggleScan, forget, setPumpMode, setThresholds };
 };

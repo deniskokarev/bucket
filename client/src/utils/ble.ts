@@ -13,6 +13,8 @@ export const BUCKET_SERVICE_UUID = 'd2f2a658-2605-4993-9794-01961b93a091';
 export const LEVEL_CHAR_UUID = '3ec2dc2f-cfdf-49e1-b232-da0dc4a88003';
 /** Pump control: Read + Write. Payload: u8 PumpMode. */
 export const PUMP_CHAR_UUID = '4feebce2-e1af-4634-915d-9e62b0756af1';
+/** Pump thresholds (encrypted Read + Write + Notify). Payload: [off:u16 LE, on:u16 LE]. */
+export const THRESHOLDS_CHAR_UUID = 'abbb42ed-de11-4636-bbfa-09158f1b0177';
 
 /** Name the firmware advertises (see firm/prj.conf CONFIG_BT_DEVICE_NAME). */
 export const DEVICE_NAME = 'BucketEvac';
@@ -36,6 +38,35 @@ export function decodeLevel(bytes: Uint8Array): LevelStatus {
     pumpOn: (bytes[1] ?? 0) !== 0,
     rawTsc: (bytes[2] ?? 0) | ((bytes[3] ?? 0) << 8),
   };
+}
+
+/** Pump hysteresis in raw TSC counts: pump OFF above `off`, ON below `on`. */
+export interface Thresholds {
+  off: number;
+  on: number;
+}
+
+export function decodeThresholds(bytes: Uint8Array): Thresholds {
+  return {
+    off: (bytes[0] ?? 0) | ((bytes[1] ?? 0) << 8),
+    on: (bytes[2] ?? 0) | ((bytes[3] ?? 0) << 8),
+  };
+}
+
+export function encodeThresholds(t: Thresholds): Uint8Array {
+  return Uint8Array.of(t.off & 0xff, t.off >> 8, t.on & 0xff, t.on >> 8);
+}
+
+/** Minimal form validation; the board re-checks and rejects invalid writes. */
+export function thresholdsError(off: string, on: string): string | null {
+  const isCount = (s: string) => /^\d+$/.test(s) && Number(s) <= 0xffff;
+  if (!isCount(off) || !isCount(on)) {
+    return 'Enter whole-number counts';
+  }
+  if (Number(off) <= Number(on)) {
+    return 'OFF count must be greater than ON count';
+  }
+  return null;
 }
 
 // --- base64 <-> bytes (ble-plx characteristic values are base64 strings) ---

@@ -14,4 +14,7 @@
  */
 void bucket_gatt_notify(void);
 
+/* Notify subscribed centrals of new pump thresholds (shell or GATT change). */
+void bucket_gatt_thresholds_changed(void);
+
 #endif /* BUCKET_GATT_H */

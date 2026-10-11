@@ -24,9 +24,13 @@ import {
   PUMP_CHAR_UUID,
   PumpMode,
   LevelStatus,
+  THRESHOLDS_CHAR_UUID,
+  Thresholds,
   base64ToBytes,
   bytesToBase64,
   decodeLevel,
+  decodeThresholds,
+  encodeThresholds,
   isBondingAdv,
   requestBlePermissions,
 } from '../utils/ble';
@@ -45,6 +49,8 @@ export interface BucketState {
   deviceName: string | null;
   level: LevelStatus | null;
   pumpMode: PumpMode;
+  /** Pump hysteresis stored on the board (null until read). */
+  thresholds: Thresholds | null;
   error: string | null;
 }
 
@@ -68,6 +74,7 @@ class BleService {
   private manager = new BleManager();
   private device: Device | null = null;
   private levelSub: Subscription | null = null;
+  private thrSub: Subscription | null = null;
   private disconnectSub: Subscription | null = null;
   private listeners = new Set<Listener>();
 
@@ -76,6 +83,7 @@ class BleService {
   private active = false; // app is in the foreground
   private scanning = false; // a scan is currently running (avoid restarts)
   private linking = false; // a connect/bond attempt is in flight
+  private secure = false; // link encrypted (secure chars readable)
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
   private state: BucketState = {
@@ -84,6 +92,7 @@ class BleService {
     deviceName: null,
     level: null,
     pumpMode: PumpMode.Auto,
+    thresholds: null,
     error: null,
   };
 
@@ -120,6 +129,7 @@ class BleService {
     if (this.device || this.linking) {
       // Link kept while backgrounded (or still coming up).
       this.attachLevel();
+      this.attachThresholds();
       return;
     }
     if (this.bondedId) {
@@ -141,6 +151,8 @@ class BleService {
     }
     this.levelSub?.remove(); // stop the 5 Hz notifications; keep the link
     this.levelSub = null;
+    this.thrSub?.remove();
+    this.thrSub = null;
   }
 
   async stop(): Promise<void> {
@@ -240,7 +252,9 @@ class BleService {
       if (ok) {
         this.bondedId = device.id;
         await AsyncStorage.setItem(STORAGE_KEY, device.id);
+        this.secure = true;
         this.update({ bonded: true, error: null });
+        this.attachThresholds();
       } else {
         this.update({
           error: 'Pairing not completed — keep the board in bonding mode and confirm the prompt.',
@@ -282,12 +296,13 @@ class BleService {
       await this.discover();
       this.attachLevel();
       this.disconnectSub = this.device.onDisconnected(() => this.handleDisconnect());
-      await this.readPump(); // bonded link encrypts automatically
+      this.secure = await this.readPump(); // bonded link encrypts automatically
       this.update({
         status: 'connected',
         deviceName: this.device.name ?? this.device.id,
         error: null,
       });
+      this.attachThresholds();
     } catch (e) {
       log('tryConnectBonded error', msg(e));
       await this.teardown(); // a half-open link would block the next attempt
@@ -380,6 +395,47 @@ class BleService {
     }
   }
 
+  /* Thresholds are encrypted: read + subscribe only once the link is secure. */
+  private async attachThresholds(): Promise<void> {
+    const d = this.device;
+    if (!d || !this.active || !this.secure || this.thrSub) {
+      return;
+    }
+    this.thrSub = d.monitorCharacteristicForService(
+      BUCKET_SERVICE_UUID,
+      THRESHOLDS_CHAR_UUID,
+      (err, char) => {
+        if (!err && char?.value) {
+          this.update({ thresholds: decodeThresholds(base64ToBytes(char.value)) });
+        }
+      },
+    );
+    try {
+      const c = await d.readCharacteristicForService(BUCKET_SERVICE_UUID, THRESHOLDS_CHAR_UUID);
+      if (c?.value) {
+        this.update({ thresholds: decodeThresholds(base64ToBytes(c.value)) });
+      }
+    } catch (e) {
+      log('read thresholds failed', msg(e));
+    }
+  }
+
+  async setThresholds(t: Thresholds): Promise<void> {
+    if (!this.device) {
+      return;
+    }
+    try {
+      await this.device.writeCharacteristicWithResponseForService(
+        BUCKET_SERVICE_UUID,
+        THRESHOLDS_CHAR_UUID,
+        bytesToBase64(encodeThresholds(t)),
+      );
+      this.update({ thresholds: t, error: null });
+    } catch (e) {
+      this.update({ error: msg(e) });
+    }
+  }
+
   async setPumpMode(mode: PumpMode): Promise<void> {
     if (!this.device) {
       return;
@@ -406,6 +462,7 @@ class BleService {
       status: 'idle',
       level: null,
       pumpMode: PumpMode.Auto,
+      thresholds: null,
       error: null,
     });
     this.startScan();
@@ -418,6 +475,9 @@ class BleService {
     this.disconnectSub = null;
     this.levelSub?.remove();
     this.levelSub = null;
+    this.thrSub?.remove();
+    this.thrSub = null;
+    this.secure = false;
     const d = this.device;
     this.device = null;
     if (d) {
@@ -436,6 +496,9 @@ class BleService {
     this.disconnectSub = null;
     this.levelSub?.remove();
     this.levelSub = null;
+    this.thrSub?.remove();
+    this.thrSub = null;
+    this.secure = false;
     this.device = null;
     this.update({ level: null });
     if (!this.active) {
