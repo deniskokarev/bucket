@@ -16,9 +16,8 @@ export const useBucket = (): UseBucketReturn => {
     const unsub = bleService.subscribe(setState);
     bleService.start();
 
-    // Scan/connect while in the foreground. On background, keep the link for a
-    // grace period (see BleService) — the Android pairing prompt itself puts
-    // the app in the background.
+    // Scan/connect while in the foreground. On background, keep the link (see
+    // BleService) — the Android pairing prompt itself backgrounds the app.
     const sub = AppState.addEventListener('change', s => {
       if (s === 'active') {
         bleService.start();

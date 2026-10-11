@@ -31,8 +31,8 @@ bonding/control pipeline works.
 03 gatt read       app shows live Level data ("raw TSC")
 04 gatt write      app pump On/Auto reaches the board (pump mode -> N)
 04b no accidental  ".", "..", "-", ".-", "-..-" keep the bond and the link
-05 disconnect      backgrounding stops notifications at once; the link drops
-                   after the app's 2 min grace (a short trip away keeps it)
+05 background      backgrounding stops notifications but keeps the link (held
+                   30 s); then the board drops it (`bt disconnect`)
 06 reconnect       foregrounding auto-connects (bonded)
 07 gatt read       live data again after reconnect
 08 forget          back to the unbonded/scanning state
@@ -41,9 +41,9 @@ bonding/control pipeline works.
 10 OS unpair       Settings > Bluetooth > Unpair, app Forget, "..-" -> pairs again
 ```
 
-Steps 05–07 currently fail: React Native freezes JS timers while the app is in
-the background, so the grace-period disconnect never fires (pending a board-side
-idle timeout).
+The app never disconnects on its own when backgrounded: React Native pauses JS
+timers in the background, so a timed disconnect can't fire. Background power
+drain is deferred.
 
 Each step is its own `test_NN_*` method; ordering comes from the numeric
 prefixes and `-f` (failfast) stops the run at the first failure. On failure the

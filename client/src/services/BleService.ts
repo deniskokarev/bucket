@@ -5,18 +5,15 @@
  *  - start(): if we have a stored bond, auto-connect (and keep retrying);
  *             otherwise scan. Scanning auto-pairs when it sees the board
  *             advertising its bonding marker (user entered SW1 short-short-long).
- *  - background(): stop scanning and Level notifications at once, then keep
- *             the link for BACKGROUND_GRACE_MS before disconnecting.
+ *  - background(): stop scanning and Level notifications, keep the link.
  *  - stop():  stop scanning and disconnect immediately.
  *  - forget(): drop the stored bond and return to the scanning state.
  *
- * Why a grace period instead of disconnecting on background: Android shows the
- * pairing prompt as a separate system activity, which RN reports as AppState
- * 'background'. Disconnecting right away aborted every first-time pairing
- * (the OS finished bonding, but the app had already dropped the link). With
- * notifications off the idle link costs little, and dropping it after the grace
- * period still bounds the BLE power drain of a backgrounded app. The grace also
- * covers other short trips away (notification shade, app switcher).
+ * Why background keeps the link: Android shows the pairing prompt as a
+ * separate system activity, which RN reports as AppState 'background', so
+ * disconnecting on background aborted first-time pairing. A timed disconnect
+ * doesn't work either: RN pauses JS timers while backgrounded. With
+ * notifications off the idle link costs little; power is a later concern.
  */
 import { BleManager, Device, Subscription } from 'react-native-ble-plx';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -61,8 +58,6 @@ const PAIR_RETRIES = 20; // ~40 s: time for the user to confirm the OS prompt
 // database (see discover()); a fresh connection does, so give up fast.
 const DISCOVER_RETRIES = 2;
 const DISCOVER_RETRY_MS = 1000;
-// Must exceed the pairing window above (see the header comment).
-const BACKGROUND_GRACE_MS = 2 * 60 * 1000;
 
 const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const delay = (ms: number) => new Promise<void>(r => setTimeout(() => r(), ms));
@@ -82,7 +77,6 @@ class BleService {
   private scanning = false; // a scan is currently running (avoid restarts)
   private linking = false; // a connect/bond attempt is in flight
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-  private graceTimer: ReturnType<typeof setTimeout> | null = null;
 
   private state: BucketState = {
     status: 'idle',
@@ -113,7 +107,6 @@ class BleService {
   async start(): Promise<void> {
     log('start', { device: !!this.device, linking: this.linking, bonded: !!this.bondedId });
     this.active = true;
-    this.clearGrace();
     if (!this.loaded) {
       this.bondedId = await AsyncStorage.getItem(STORAGE_KEY);
       this.loaded = true;
@@ -125,7 +118,7 @@ class BleService {
       return;
     }
     if (this.device || this.linking) {
-      // Link survived the background grace period (or is still coming up).
+      // Link kept while backgrounded (or still coming up).
       this.attachLevel();
       return;
     }
@@ -146,14 +139,8 @@ class BleService {
       this.update({ status: 'idle' });
       return;
     }
-    this.levelSub?.remove(); // stop the 5 Hz notifications right away
+    this.levelSub?.remove(); // stop the 5 Hz notifications; keep the link
     this.levelSub = null;
-    this.clearGrace();
-    this.graceTimer = setTimeout(() => {
-      log('grace expired');
-      this.graceTimer = null;
-      this.stop();
-    }, BACKGROUND_GRACE_MS);
   }
 
   async stop(): Promise<void> {
@@ -292,10 +279,6 @@ class BleService {
       this.device = await this.manager.connectToDevice(this.bondedId, {
         autoConnect: true,
       });
-      if (!this.active && !this.graceTimer) {
-        await this.stop(); // connected after the grace period ran out
-        return;
-      }
       await this.discover();
       this.attachLevel();
       this.disconnectSub = this.device.onDisconnected(() => this.handleDisconnect());
@@ -327,13 +310,6 @@ class BleService {
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
-    }
-  }
-
-  private clearGrace(): void {
-    if (this.graceTimer) {
-      clearTimeout(this.graceTimer);
-      this.graceTimer = null;
     }
   }
 
@@ -436,7 +412,6 @@ class BleService {
   }
 
   private async teardown(): Promise<void> {
-    this.clearGrace();
     // Remove the disconnect watcher first so an *intentional* teardown
     // (stop/forget) doesn't trigger handleDisconnect's reconnect/rescan.
     this.disconnectSub?.remove();
@@ -457,7 +432,6 @@ class BleService {
 
   private handleDisconnect(): void {
     log('disconnected', { active: this.active, bonded: !!this.bondedId, linking: this.linking });
-    this.clearGrace();
     this.disconnectSub?.remove();
     this.disconnectSub = null;
     this.levelSub?.remove();

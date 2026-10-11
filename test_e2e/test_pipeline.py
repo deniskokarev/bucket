@@ -10,8 +10,8 @@ Ordered sequence (method name prefixes enforce order; run with -f/failfast):
     04 gatt write     -> app pump control reaches the board
     04b no accidental -> other SW1 presses (".", "..", "-", ".-", "-..-")
         unbond           keep the bond and the link
-    05 disconnect     -> backgrounding silences notifications; the link drops
-                         after the 2 min grace (a short trip away keeps it)
+    05 background     -> backgrounding silences notifications but keeps the
+                         link; then the board drops it (`bt disconnect`)
     06 reconnect      -> foregrounding auto-connects (bonded)
     07 gatt read      -> live data again after reconnect
     08 forget         -> back to the unbonded/scanning state
@@ -51,8 +51,8 @@ PUMP_ON = "On"
 PUMP_AUTO = "Auto"
 DEVICE_NAME = "BucketEvac"          # advertised name / OS paired-devices entry
 
-# Must match BACKGROUND_GRACE_MS in client/src/services/BleService.ts.
-BACKGROUND_GRACE_S = 120
+# How long a backgrounded app must hold the link without dropping it.
+BACKGROUND_HOLD_S = 30
 
 
 class PipelineTest(unittest.TestCase):
@@ -253,30 +253,37 @@ class PipelineTest(unittest.TestCase):
         self.assertEqual(self.board.bond_count(), 1, "bond lost to a non-rebond code")
         self._assert_secure_write()
 
-    def test_05_disconnect(self):
-        # Backgrounding silences notifications at once but keeps the link for
-        # the app's grace period (the Android pairing prompt backgrounds the
-        # app too); a short trip away must not drop it.
+    def test_05_background(self):
+        # Backgrounding silences notifications but keeps the link (the Android
+        # pairing prompt backgrounds the app too). No JS timers are involved:
+        # RN pauses them in the background.
         self.board.clear()
         self.app.home()
         try:
             self.board.wait_for(r"level notifications disabled", timeout=15)
         except AssertionError as e:
             self.fail_verbose(f"backgrounding did not stop Level notifications: {e}")
+        time.sleep(BACKGROUND_HOLD_S)
+        if "central disconnected" in self.board.snapshot():
+            self.fail_verbose("link dropped while the app was in the background")
         self.app.foreground()
         try:
             self.board.wait_for(r"level notifications enabled", timeout=15)
         except AssertionError as e:
-            self.fail_verbose(f"foregrounding within the grace did not resume notifications: {e}")
+            self.fail_verbose(f"foregrounding did not resume notifications: {e}")
         if "central disconnected" in self.board.snapshot():
-            self.fail_verbose("link dropped during a short trip to the background")
+            self.fail_verbose("link dropped across a trip to the background")
 
-        self.board.clear()
+        # Board-side link loss while backgrounded (e.g. out of range): the app
+        # goes idle and reconnects when foregrounded (test_06).
         self.app.home()
+        self.board.wait_for(r"level notifications disabled", timeout=15)
+        self.board.clear()
+        self.board.send("bt disconnect")
         try:
-            self.board.wait_for(r"central disconnected", timeout=BACKGROUND_GRACE_S + 30)
+            self.board.wait_for(r"central disconnected", timeout=15)
         except AssertionError as e:
-            self.fail_verbose(f"link not dropped after the background grace period: {e}")
+            self.fail_verbose(f"board-side disconnect did not drop the link: {e}")
 
     def test_06_reconnect(self):
         self.board.clear()
