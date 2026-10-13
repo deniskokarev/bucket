@@ -17,6 +17,15 @@
 >                                 E ── GND          diode across motor, cathode to +V
 > ```
 >
+> **Rb = 330 Ω** (was 10 kΩ, changed 2026-10-12). The TIP31A is a plain
+> NPN, **not a Darlington**, and its gain is only about 10–25 at amp-level
+> currents. From a 3.3 V GPIO, 10 kΩ gives about 0.26 mA of base current. That
+> saturates only a few mA of collector current, so the transistor sat in its
+> linear region. 330 Ω gives (3.3 − 0.7) / 330 ≈ 8 mA of base current, within
+> the STM32's per-pin limits. That fully switches roughly 100–150 mA of motor
+> current. For a bigger pump, use a logic-level N-MOSFET or a Darlington
+> (TIP120) instead. The pin and firmware stay the same.
+>
 > | Signal | MCU pin | ARDUINO | Connector-pin |
 > | --- | --- | --- | --- |
 > | **Pump transistor base (via Rb)** | **PA9** | **D9** | **CN5-2** |
@@ -114,6 +123,17 @@ form. Both persist across reboot.
 **Using a 100 nF "104" Cs** would give ~10× the counts (dry ~3.4k, full
 ~1.4k), still under the 16383 ceiling as long as Cx + Cpar ≥ ~5 pF. That's
 true with this wiring. If you swap it in, scale both thresholds ×10.
+
+### Shield validation (2026-10-12): PASS
+
+The jumper leads are now on a home-made ARDUINO shield: Cs on D4, Rs to the
+`C_SENSE` electrode pad on D8, and the pump driver on D9 (Rb = 330 Ω → TIP31A,
+open collector). The load is a **2 W fish-tank pump**.
+
+End-to-end check: **putting a 33 pF cap from `C_SENSE` to GND turns the pump
+on**. The count drops below the ON threshold (220; bench reading at 33 pF is
+136). This exercises the whole chain: TSC → level hysteresis → pump GPIO → transistor
+→ motor.
 
 ---
 
