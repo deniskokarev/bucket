@@ -34,6 +34,17 @@ TIP31A pump driver, USB-A pump outlet).*
   are in [`hard/tsc-validation.md`](hard/tsc-validation.md).
 - **Debug / flash:** on-board ST-LINK/V2-1 over USB.
 
+## Android client
+
+The [`client/`](client/) app's **primary purpose is tuning the water-level
+thresholds on the real tank**. The raw TSC count depends on the bucket, the
+electrode placement and the wiring parasitics, so the ON/OFF levels have to be
+set in place. With the app you can watch the live raw count while filling and
+draining the tank. You can then write the thresholds from its Settings form
+(encrypted GATT, persisted on the board) without a serial cable. Monitoring
+the level and pump and overriding the pump mode come second. In normal use
+the board runs on its own.
+
 ## Repository layout
 
 ```
