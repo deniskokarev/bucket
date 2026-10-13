@@ -1,5 +1,29 @@
 # TSC capacitive sensing — validation & prototyping
 
+> **Pump motor output: PA9 = ARDUINO D9 (CN5-2)**, active-high. High (3.3 V)
+> means pump ON. It's a plain GPIO that drives the base of an NPN transistor
+> (TIP31A) through a base resistor. The motor sits between +V and the
+> collector (open collector), with the emitter to GND. Put a flyback diode
+> across the motor. **Never drive the motor from the pin directly.** The
+> transistor's emitter ground must be common with the board's
+> **GND** (CN5-7 or CN6-6/7). Source: `pump_out` in
+> `firm/boards/nucleo_wb55rg.overlay` (`&gpioa 9 GPIO_ACTIVE_HIGH`, alias
+> `pump`), mapped to D9 by the board's `arduino_r3_connector.dtsi`. D10–D13
+> (PA4–PA7) are avoided because the upstream board DTS assigns them to
+> `spi1` (and PA6 to LPUART1 CTS).
+>
+> ```
+> D9 (PA9) ──[ Rb ]── B  TIP31A   C ── motor(−)    motor(+) ── +V
+>                                 E ── GND          diode across motor, cathode to +V
+> ```
+>
+> | Signal | MCU pin | ARDUINO | Connector-pin |
+> | --- | --- | --- | --- |
+> | **Pump transistor base (via Rb)** | **PA9** | **D9** | **CN5-2** |
+> | TSC sampling cap `Cs` | PC10 | D4 | CN9-5 |
+> | TSC electrode | PC12 | D8 | CN5-1 |
+> | GND | GND | GND | CN5-7 (or CN6-6/7) |
+
 ## Quick start: bench test on the ARDUINO headers (no soldering, no bucket)
 
 **Yes, TSC pins reach the ARDUINO headers.** TSC Group 3 lands on three

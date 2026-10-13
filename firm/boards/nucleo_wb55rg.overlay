@@ -29,11 +29,13 @@
 		pump = &pump_out;
 	};
 
-	/* Simple GPIO output for the pump MOSFET/relay driver. */
+	/* Simple GPIO output for the pump driver transistor (base resistor):
+	 * PA9 = ARDUINO D9 (CN5-2), high = pump ON. D10-D13 (PA4-PA7) are
+	 * avoided: the board DTS gives them to spi1 (PA6 also LPUART1 CTS). */
 	pump_control {
 		compatible = "gpio-leds";
 		pump_out: pump_out {
-			gpios = <&gpioa 0 GPIO_ACTIVE_HIGH>;
+			gpios = <&gpioa 9 GPIO_ACTIVE_HIGH>;
 			label = "Evacuation pump";
 		};
 	};
